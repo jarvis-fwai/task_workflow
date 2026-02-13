@@ -65,7 +65,7 @@ export const rulesRouter = router({
           name: input.name,
           projectId: input.projectId,
           trigger: input.trigger,
-          conditions: input.conditions ?? null,
+          conditions: input.conditions ?? undefined,
           actions: input.actions,
           createdById: ctx.session.user.id,
         },

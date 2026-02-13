@@ -92,7 +92,7 @@ function getActionLabel(value: string): string {
 
 interface ConditionRow {
   field: string;
-  operator: string;
+  operator: "equals" | "not_equals" | "greater_than" | "less_than" | "contains" | "not_contains" | "is_empty" | "is_not_empty";
   value: string;
 }
 
@@ -160,7 +160,7 @@ export function RulesManager({ projectId }: RulesManagerProps) {
     setConditions(conditions.filter((_, i) => i !== index));
   }
 
-  function updateCondition(index: number, field: keyof ConditionRow, value: string) {
+  function updateCondition(index: number, field: keyof ConditionRow, value: any) {
     const updated = [...conditions];
     updated[index] = { ...updated[index]!, [field]: value };
     setConditions(updated);

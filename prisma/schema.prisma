@@ -558,6 +558,7 @@ enum NotificationType {
   FOLLOWER_ADDED
   DUE_DATE_APPROACHING
   TASK_OVERDUE
+  RULE_TRIGGERED
 }
 
 // ============================================================
