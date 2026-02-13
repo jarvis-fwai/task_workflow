@@ -50,6 +50,7 @@ export function Sidebar() {
   }, []);
 
   const { data: recents } = trpc.recents.list.useQuery({ limit: 5 });
+  const { data: unreadCount } = trpc.notifications.unreadCount.useQuery();
   const { data: workspaces } = trpc.workspaces.list.useQuery();
   const workspaceId = workspaces?.[0]?.id;
 
@@ -95,6 +96,11 @@ export function Sidebar() {
                 >
                   <item.icon className="h-4 w-4" />
                   {item.label}
+                  {item.label === "Inbox" && unreadCount && unreadCount > 0 ? (
+                    <span className="ml-auto rounded-full bg-[#4573D2] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  ) : null}
                 </Link>
               </li>
             ))}
