@@ -14,7 +14,102 @@ import {
   CheckCircle2,
   Circle,
   GripVertical,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+
+function MyTasksCalendar({
+  tasks,
+  onTaskClick,
+}: {
+  tasks: any[];
+  onTaskClick: (id: string) => void;
+}) {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startPadding = firstDay.getDay();
+    const days: { date: Date; isCurrentMonth: boolean }[] = [];
+    for (let i = startPadding - 1; i >= 0; i--) {
+      days.push({ date: new Date(year, month, -i), isCurrentMonth: false });
+    }
+    for (let i = 1; i <= lastDay.getDate(); i++) {
+      days.push({ date: new Date(year, month, i), isCurrentMonth: true });
+    }
+    const remaining = 42 - days.length;
+    for (let i = 1; i <= remaining; i++) {
+      days.push({ date: new Date(year, month + 1, i), isCurrentMonth: false });
+    }
+    return days;
+  }, [year, month]);
+
+  const getTasksForDate = (date: Date) =>
+    tasks.filter((t) => {
+      if (!t.dueDate) return false;
+      const d = new Date(t.dueDate);
+      return d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth() && d.getDate() === date.getDate();
+    });
+
+  const today = new Date();
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center gap-2">
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentDate(new Date(year, month - 1))}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <h3 className="text-sm font-medium">
+          {currentDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+        </h3>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCurrentDate(new Date(year, month + 1))}>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="grid grid-cols-7 gap-px rounded-lg border bg-gray-200 dark:bg-border">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+          <div key={d} className="bg-white p-2 text-center text-xs font-medium text-muted-foreground dark:bg-card">
+            {d}
+          </div>
+        ))}
+        {calendarDays.map((day, i) => {
+          const dayTasks = getTasksForDate(day.date);
+          const isToday = day.date.toDateString() === today.toDateString();
+          return (
+            <div
+              key={i}
+              className={cn(
+                "min-h-[80px] bg-white p-1 dark:bg-card",
+                !day.isCurrentMonth && "bg-gray-50 dark:bg-muted/10"
+              )}
+            >
+              <div className={cn("mb-1 text-xs", isToday ? "font-bold text-blue-600" : day.isCurrentMonth ? "text-foreground" : "text-muted-foreground")}>
+                {day.date.getDate()}
+              </div>
+              <div className="space-y-0.5">
+                {dayTasks.slice(0, 3).map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => onTaskClick(t.id)}
+                    className="block w-full truncate rounded bg-blue-50 px-1 py-0.5 text-left text-[10px] text-blue-700 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-300"
+                  >
+                    {t.title}
+                  </button>
+                ))}
+                {dayTasks.length > 3 && (
+                  <span className="text-[10px] text-muted-foreground">+{dayTasks.length - 3} more</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 type ViewMode = "list" | "board" | "calendar";
 
@@ -147,7 +242,73 @@ export function MyTasksContent() {
                 set due dates.
               </p>
             </div>
+          ) : viewMode === "board" ? (
+            /* Board View */
+            <div className="flex gap-4 overflow-x-auto pb-4">
+              {sections.map((section) => (
+                <div
+                  key={section.label}
+                  className="min-w-[280px] max-w-[320px] rounded-lg bg-[#f5f5f5] p-3 dark:bg-muted/30"
+                >
+                  <h3 className={cn("mb-3 text-sm font-semibold", section.color)}>
+                    {section.label}
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      ({section.tasks.length})
+                    </span>
+                  </h3>
+                  <div className="space-y-2">
+                    {section.tasks.map((task) => (
+                      <button
+                        key={task.id}
+                        onClick={() => setSelectedTaskId(task.id)}
+                        className="w-full rounded-lg border bg-white p-3 text-left shadow-sm hover:shadow dark:bg-card"
+                      >
+                        <div className="flex items-start gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggle(task.id, task.status);
+                            }}
+                            className="mt-0.5 flex-shrink-0"
+                          >
+                            {task.status === "COMPLETE" ? (
+                              <CheckCircle2 className="h-4 w-4 text-green-600" />
+                            ) : (
+                              <Circle className="h-4 w-4 text-[#cfcbcb] hover:text-green-600" />
+                            )}
+                          </button>
+                          <div className="flex-1">
+                            <p className={cn("text-sm", task.status === "COMPLETE" && "text-muted-foreground line-through")}>
+                              {task.title}
+                            </p>
+                            <div className="mt-1 flex items-center gap-2">
+                              {task.taskProjects?.[0] && (
+                                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+                                  {task.taskProjects[0].project.name}
+                                </span>
+                              )}
+                              {task.dueDate && (
+                                <span className={cn("text-[10px]", isOverdue(task.dueDate) && task.status !== "COMPLETE" ? "text-red-600" : "text-muted-foreground")}>
+                                  {formatDate(task.dueDate)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : viewMode === "calendar" ? (
+            /* Calendar View */
+            <MyTasksCalendar
+              tasks={tasks.filter((t) => t.status === "INCOMPLETE")}
+              onTaskClick={setSelectedTaskId}
+            />
           ) : (
+            /* List View */
             <div className="space-y-6">
               {sections.map((section) => (
                 <div key={section.label}>

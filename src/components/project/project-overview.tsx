@@ -388,16 +388,44 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
           </CardContent>
         </Card>
 
-        {/* Milestones placeholder */}
+        {/* Milestones */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Milestones</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
-              No milestones set. Create milestone tasks to track key project
-              deliverables.
-            </p>
+            {(() => {
+              const milestones = tasks?.filter((t) => t.isMilestone) || [];
+              if (milestones.length === 0) {
+                return (
+                  <p className="text-sm text-muted-foreground">
+                    No milestones set. Mark tasks as milestones to track key deliverables.
+                  </p>
+                );
+              }
+              return (
+                <div className="space-y-2">
+                  {milestones.map((m) => (
+                    <div key={m.id} className="flex items-center gap-3 rounded-lg border p-3">
+                      <span className={m.status === "COMPLETE" ? "text-green-600" : "text-purple-500"}>◆</span>
+                      <div className="flex-1">
+                        <span className={`text-sm font-medium ${m.status === "COMPLETE" ? "text-muted-foreground line-through" : ""}`}>
+                          {m.title}
+                        </span>
+                      </div>
+                      {m.dueDate && (
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(m.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </span>
+                      )}
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] ${m.status === "COMPLETE" ? "bg-green-100 text-green-700" : "bg-purple-100 text-purple-700"}`}>
+                        {m.status === "COMPLETE" ? "Done" : "Pending"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
       </div>
