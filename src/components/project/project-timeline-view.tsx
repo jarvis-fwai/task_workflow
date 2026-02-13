@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { CheckCircle2, Circle, ChevronLeft, ChevronRight } from "lucide-react";
+import { CheckCircle2, Circle, ChevronLeft, ChevronRight, Diamond } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface ProjectTimelineViewProps {
@@ -300,6 +300,7 @@ export function ProjectTimelineView({
                     );
                     if (!bar) return null;
 
+                    const isMilestone = (row.task as any).isMilestone;
                     const sectionColor =
                       sections?.find((s) =>
                         row.task!.taskProjects?.some(
@@ -308,6 +309,30 @@ export function ProjectTimelineView({
                       )
                         ? "#4573D2"
                         : "#9CA3AF";
+
+                    if (isMilestone) {
+                      return (
+                        <div
+                          className="absolute flex cursor-pointer items-center justify-center"
+                          style={{
+                            left: bar.left + bar.width / 2 - 10,
+                            top: 4,
+                            width: 20,
+                            height: rowHeight - 8,
+                          }}
+                          onClick={() => onTaskClick(row.id)}
+                          title={row.name}
+                        >
+                          <Diamond
+                            className="h-5 w-5"
+                            style={{
+                              color: row.task.status === "COMPLETE" ? "#16a34a" : "#9333ea",
+                              fill: row.task.status === "COMPLETE" ? "#16a34a" : "#9333ea",
+                            }}
+                          />
+                        </div>
+                      );
+                    }
 
                     return (
                       <div
