@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { useBulkSelection } from "@/contexts/bulk-selection-context";
@@ -9,12 +9,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Plus,
   ChevronRight,
   CheckCircle2,
   Circle,
   GripVertical,
   Calendar,
+  Check,
+  X,
 } from "lucide-react";
 import { BulkActionsToolbar } from "@/components/task/bulk-actions-toolbar";
 import { TaskListSkeleton } from "@/components/ui/loading-skeletons";
@@ -26,6 +33,211 @@ interface ProjectListViewProps {
   projectId: string;
   onTaskClick: (taskId: string) => void;
   sortRules?: SortRule[];
+}
+
+// ── Inline Assignee Picker ──────────────────────────────────────────────
+function AssigneeCell({
+  task,
+  projectId,
+}: {
+  task: any;
+  projectId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const utils = trpc.useUtils();
+  const { data: project } = trpc.projects.get.useQuery({ id: projectId });
+  const { data: workspaces } = trpc.workspaces.list.useQuery();
+
+  const updateTask = trpc.tasks.update.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
+
+  // Get workspace members through the workspace
+  const workspaceId = project?.workspaceId;
+  const { data: workspace } = trpc.workspaces.get.useQuery(
+    { id: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+
+  const members = workspace?.members ?? [];
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <div className="flex w-32 cursor-pointer items-center justify-center hover:bg-blue-50/50 rounded px-1 py-0.5 transition-colors">
+          {task.assignee ? (
+            <Avatar className="h-6 w-6">
+              <AvatarFallback className="bg-[#4573D2] text-[10px] text-white">
+                {task.assignee.name
+                  ?.split(" ")
+                  .map((n: string) => n[0])
+                  .join("")}
+              </AvatarFallback>
+            </Avatar>
+          ) : (
+            <span className="text-xs text-muted-foreground opacity-0 group-hover:opacity-100">—</span>
+          )}
+        </div>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-1" align="start">
+        <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">Assign to</div>
+        <button
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-gray-100"
+          onClick={() => {
+            updateTask.mutate({ id: task.id, assigneeId: null });
+            setOpen(false);
+          }}
+        >
+          <X className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Unassigned</span>
+          {!task.assigneeId && <Check className="ml-auto h-3.5 w-3.5 text-blue-500" />}
+        </button>
+        {members.map((member: any) => (
+          <button
+            key={member.user?.id ?? member.id}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-gray-100"
+            onClick={() => {
+              updateTask.mutate({ id: task.id, assigneeId: member.user?.id ?? member.userId });
+              setOpen(false);
+            }}
+          >
+            <Avatar className="h-5 w-5">
+              <AvatarFallback className="bg-[#4573D2] text-[9px] text-white">
+                {(member.user?.name ?? "")
+                  .split(" ")
+                  .map((n: string) => n[0])
+                  .join("")}
+              </AvatarFallback>
+            </Avatar>
+            <span>{member.user?.name ?? member.name}</span>
+            {task.assigneeId === (member.user?.id ?? member.userId) && (
+              <Check className="ml-auto h-3.5 w-3.5 text-blue-500" />
+            )}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ── Inline Date Picker ──────────────────────────────────────────────────
+function DueDateCell({
+  task,
+  projectId,
+}: {
+  task: any;
+  projectId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const utils = trpc.useUtils();
+
+  const updateTask = trpc.tasks.update.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
+
+  const formatDate = (date: string | Date | null) => {
+    if (!date) return null;
+    const d = new Date(date);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+
+  const handleDateChange = (value: string) => {
+    if (value) {
+      const d = new Date(value + "T00:00:00Z");
+      updateTask.mutate({ id: task.id, dueDate: d.toISOString() });
+    } else {
+      updateTask.mutate({ id: task.id, dueDate: null });
+    }
+    setOpen(false);
+  };
+
+  const currentValue = task.dueDate
+    ? new Date(task.dueDate).toISOString().split("T")[0]
+    : "";
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <div className="flex w-32 cursor-pointer items-center justify-center hover:bg-blue-50/50 rounded px-1 py-0.5 transition-colors text-xs text-muted-foreground">
+          {task.dueDate ? (
+            <span className="flex items-center gap-1">
+              <Calendar className="h-3 w-3" />
+              {formatDate(task.dueDate)}
+            </span>
+          ) : (
+            <span className="opacity-0 group-hover:opacity-100">—</span>
+          )}
+        </div>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-3" align="start">
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">Due date</div>
+          <input
+            ref={inputRef}
+            type="date"
+            className="rounded border px-2 py-1 text-sm"
+            defaultValue={currentValue}
+            onChange={(e) => handleDateChange(e.target.value)}
+            autoFocus
+          />
+          {task.dueDate && (
+            <button
+              className="block text-xs text-red-500 hover:text-red-700"
+              onClick={() => {
+                updateTask.mutate({ id: task.id, dueDate: null });
+                setOpen(false);
+              }}
+            >
+              Remove date
+            </button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ── Inline Status Cell ──────────────────────────────────────────────────
+function StatusCell({
+  task,
+  projectId,
+}: {
+  task: any;
+  projectId: string;
+}) {
+  const utils = trpc.useUtils();
+
+  const completeTask = trpc.tasks.complete.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
+  const uncompleteTask = trpc.tasks.uncomplete.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
+
+  const toggle = () => {
+    if (task.status === "COMPLETE") {
+      uncompleteTask.mutate({ id: task.id });
+    } else {
+      completeTask.mutate({ id: task.id });
+    }
+  };
+
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        toggle();
+      }}
+      className="mr-2 flex-shrink-0"
+    >
+      {task.status === "COMPLETE" ? (
+        <CheckCircle2 className="h-4 w-4 text-green-600" />
+      ) : (
+        <Circle className="h-4 w-4 text-[#cfcbcb] hover:text-green-600" />
+      )}
+    </button>
+  );
 }
 
 export function ProjectListView({
@@ -71,21 +283,6 @@ export function ProjectListView({
       utils.tasks.list.invalidate({ projectId });
       setNewTaskTitle("");
       setAddingTaskInSection(null);
-    },
-  });
-
-  const completeTask = trpc.tasks.complete.useMutation({
-    onSuccess: (_data, variables) => {
-      utils.tasks.list.invalidate({ projectId });
-      pushUndo("Task completed", () => {
-        uncompleteTask.mutate({ id: variables.id });
-      });
-    },
-  });
-
-  const uncompleteTask = trpc.tasks.uncomplete.useMutation({
-    onSuccess: () => {
-      utils.tasks.list.invalidate({ projectId });
     },
   });
 
@@ -164,23 +361,6 @@ export function ProjectListView({
       projectId,
       sectionId,
     });
-  };
-
-  const handleToggleComplete = (
-    taskId: string,
-    currentStatus: string
-  ) => {
-    if (currentStatus === "COMPLETE") {
-      uncompleteTask.mutate({ id: taskId });
-    } else {
-      completeTask.mutate({ id: taskId });
-    }
-  };
-
-  const formatDate = (date: string | Date | null) => {
-    if (!date) return null;
-    const d = new Date(date);
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
   if (sectionsLoading || tasksLoading) {
@@ -298,19 +478,10 @@ export function ProjectListView({
                   <div className="flex w-8 items-center justify-center">
                     <GripVertical className="h-3.5 w-3.5 text-transparent group-hover:text-[#cfcbcb]" />
                   </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleToggleComplete(task.id, task.status);
-                    }}
-                    className="mr-2 flex-shrink-0"
-                  >
-                    {task.status === "COMPLETE" ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-600" />
-                    ) : (
-                      <Circle className="h-4 w-4 text-[#cfcbcb] hover:text-green-600" />
-                    )}
-                  </button>
+
+                  {/* Inline Status Toggle */}
+                  <StatusCell task={task} projectId={projectId} />
+
                   <button
                     onClick={() => onTaskClick(task.id)}
                     className={cn(
@@ -332,26 +503,12 @@ export function ProjectListView({
                       {(task as any).approvalStatus === "CHANGES_REQUESTED" ? "Changes" : (task as any).approvalStatus}
                     </span>
                   )}
-                  <div className="flex w-32 items-center justify-center">
-                    {task.assignee && (
-                      <Avatar className="h-6 w-6">
-                        <AvatarFallback className="bg-[#4573D2] text-[10px] text-white">
-                          {task.assignee.name
-                            ?.split(" ")
-                            .map((n) => n[0])
-                            .join("")}
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
-                  </div>
-                  <div className="flex w-32 items-center justify-center text-xs text-muted-foreground">
-                    {task.dueDate && (
-                      <span className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        {formatDate(task.dueDate)}
-                      </span>
-                    )}
-                  </div>
+
+                  {/* Inline Assignee Picker */}
+                  <AssigneeCell task={task} projectId={projectId} />
+
+                  {/* Inline Due Date Picker */}
+                  <DueDateCell task={task} projectId={projectId} />
                 </div>
               ))}
 

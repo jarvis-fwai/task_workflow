@@ -108,6 +108,9 @@ export const tasksRouter = router({
             include: { section: true },
           },
           tags: { include: { tag: true } },
+          subtasks: {
+            select: { id: true, status: true },
+          },
           _count: {
             select: { subtasks: true, comments: true, attachments: true },
           },

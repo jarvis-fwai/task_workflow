@@ -1,11 +1,18 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { TaskDetailPanel } from "@/components/task/task-detail-panel";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Plus,
   List,
@@ -16,13 +23,168 @@ import {
   GripVertical,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react";
+
+type GroupBy = "none" | "due_date" | "project" | "priority";
+
+interface TaskItem {
+  id: string;
+  title: string;
+  status: string;
+  dueDate: string | Date | null;
+  priority: string | null;
+  taskProjects?: { project: { id: string; name: string } }[];
+  [key: string]: unknown;
+}
+
+function getDateGroupKey(dueDate: string | Date | null, now: Date): string {
+  if (!dueDate) return "No Date";
+  const d = new Date(dueDate);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  const dayAfterTomorrow = new Date(today);
+  dayAfterTomorrow.setDate(today.getDate() + 2);
+
+  // End of this week (Sunday)
+  const thisWeekEnd = new Date(today);
+  thisWeekEnd.setDate(today.getDate() + (7 - today.getDay()));
+  // End of next week
+  const nextWeekEnd = new Date(thisWeekEnd);
+  nextWeekEnd.setDate(thisWeekEnd.getDate() + 7);
+
+  const taskDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+  if (taskDate < today) return "Overdue";
+  if (taskDate.getTime() === today.getTime()) return "Today";
+  if (taskDate.getTime() === tomorrow.getTime()) return "Tomorrow";
+  if (taskDate <= thisWeekEnd) return "This Week";
+  if (taskDate <= nextWeekEnd) return "Next Week";
+  return "Later";
+}
+
+const DATE_GROUP_ORDER = [
+  "Overdue",
+  "Today",
+  "Tomorrow",
+  "This Week",
+  "Next Week",
+  "Later",
+  "No Date",
+];
+
+const PRIORITY_ORDER = ["HIGH", "MEDIUM", "LOW", "NONE"];
+const PRIORITY_LABELS: Record<string, string> = {
+  HIGH: "High",
+  MEDIUM: "Medium",
+  LOW: "Low",
+  NONE: "No Priority",
+};
+
+function groupTasks(
+  tasks: TaskItem[],
+  groupBy: GroupBy,
+  now: Date
+): { label: string; tasks: TaskItem[]; color?: string }[] {
+  if (groupBy === "none") {
+    // Default sections
+    const overdue = tasks.filter(
+      (t) => t.status === "INCOMPLETE" && t.dueDate && new Date(t.dueDate) < now
+    );
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const todayTasks = tasks.filter(
+      (t) =>
+        t.status === "INCOMPLETE" &&
+        t.dueDate &&
+        new Date(t.dueDate) >= now &&
+        new Date(t.dueDate) < todayEnd
+    );
+    const upcoming = tasks.filter(
+      (t) =>
+        t.status === "INCOMPLETE" &&
+        (!t.dueDate || new Date(t.dueDate) >= todayEnd)
+    );
+    const completed = tasks.filter((t) => t.status === "COMPLETE");
+    return [
+      { label: "Overdue", tasks: overdue, color: "text-red-600" },
+      { label: "Today", tasks: todayTasks, color: "text-green-600" },
+      { label: "Upcoming", tasks: upcoming, color: "text-[#1e1f21]" },
+      { label: "Completed", tasks: completed, color: "text-muted-foreground" },
+    ].filter((s) => s.tasks.length > 0);
+  }
+
+  if (groupBy === "due_date") {
+    const groups = new Map<string, TaskItem[]>();
+    for (const key of DATE_GROUP_ORDER) groups.set(key, []);
+    for (const task of tasks) {
+      if (task.status === "COMPLETE") continue;
+      const key = getDateGroupKey(task.dueDate, now);
+      groups.get(key)!.push(task);
+    }
+    const result = DATE_GROUP_ORDER.filter((k) => groups.get(k)!.length > 0).map(
+      (k) => ({
+        label: k,
+        tasks: groups.get(k)!,
+        color: k === "Overdue" ? "text-red-600" : k === "Today" ? "text-green-600" : "text-[#1e1f21]",
+      })
+    );
+    const completed = tasks.filter((t) => t.status === "COMPLETE");
+    if (completed.length > 0)
+      result.push({ label: "Completed", tasks: completed, color: "text-muted-foreground" });
+    return result;
+  }
+
+  if (groupBy === "project") {
+    const groups = new Map<string, { name: string; tasks: TaskItem[] }>();
+    const noProject: TaskItem[] = [];
+    for (const task of tasks) {
+      const proj = task.taskProjects?.[0]?.project;
+      if (proj) {
+        if (!groups.has(proj.id)) groups.set(proj.id, { name: proj.name, tasks: [] });
+        groups.get(proj.id)!.tasks.push(task);
+      } else {
+        noProject.push(task);
+      }
+    }
+    const result = Array.from(groups.values()).map((g) => ({
+      label: g.name,
+      tasks: g.tasks,
+    }));
+    if (noProject.length > 0) result.push({ label: "No Project", tasks: noProject });
+    return result;
+  }
+
+  if (groupBy === "priority") {
+    const groups = new Map<string, TaskItem[]>();
+    for (const key of PRIORITY_ORDER) groups.set(key, []);
+    for (const task of tasks) {
+      const p = (task.priority || "NONE").toUpperCase();
+      const key = PRIORITY_ORDER.includes(p) ? p : "NONE";
+      groups.get(key)!.push(task);
+    }
+    return PRIORITY_ORDER.filter((k) => groups.get(k)!.length > 0).map((k) => ({
+      label: PRIORITY_LABELS[k],
+      tasks: groups.get(k)!,
+      color:
+        k === "HIGH"
+          ? "text-red-600"
+          : k === "MEDIUM"
+            ? "text-orange-500"
+            : k === "LOW"
+              ? "text-blue-500"
+              : "text-muted-foreground",
+    }));
+  }
+
+  return [];
+}
 
 function MyTasksCalendar({
   tasks,
   onTaskClick,
 }: {
-  tasks: any[];
+  tasks: TaskItem[];
   onTaskClick: (id: string) => void;
 }) {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -113,8 +275,44 @@ function MyTasksCalendar({
 
 type ViewMode = "list" | "board" | "calendar";
 
+function CollapsibleSection({
+  label,
+  count,
+  color,
+  defaultOpen = true,
+  children,
+}: {
+  label: string;
+  count: number;
+  color?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 mb-2"
+      >
+        <ChevronDown
+          className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", !open && "-rotate-90")}
+        />
+        <h3 className={cn("text-sm font-semibold", color || "text-[#1e1f21]")}>
+          {label}
+        </h3>
+        <span className="ml-1 text-xs font-normal text-muted-foreground">
+          ({count})
+        </span>
+      </button>
+      {open && children}
+    </div>
+  );
+}
+
 export function MyTasksContent() {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -167,38 +365,10 @@ export function MyTasksContent() {
     return new Date(date) < now;
   };
 
-  // Group by section: Recently assigned, Today, Upcoming
-  const todayEnd = now ? new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) : null;
-
-  const overdueTasks = now
-    ? tasks?.filter(
-        (t) => t.status === "INCOMPLETE" && t.dueDate && new Date(t.dueDate) < now
-      ) || []
-    : [];
-  const todayTasks = now && todayEnd
-    ? tasks?.filter(
-        (t) =>
-          t.status === "INCOMPLETE" &&
-          t.dueDate &&
-          new Date(t.dueDate) >= now &&
-          new Date(t.dueDate) < todayEnd
-      ) || []
-    : [];
-  const upcomingTasks = todayEnd
-    ? tasks?.filter(
-        (t) =>
-          t.status === "INCOMPLETE" &&
-          (!t.dueDate || new Date(t.dueDate) >= todayEnd)
-      ) || []
-    : tasks?.filter((t) => t.status === "INCOMPLETE") || [];
-  const completedTasks = tasks?.filter((t) => t.status === "COMPLETE") || [];
-
-  const sections = [
-    { label: "Overdue", tasks: overdueTasks, color: "text-red-600" },
-    { label: "Today", tasks: todayTasks, color: "text-green-600" },
-    { label: "Upcoming", tasks: upcomingTasks, color: "text-[#1e1f21]" },
-    { label: "Completed", tasks: completedTasks, color: "text-muted-foreground" },
-  ].filter((s) => s.tasks.length > 0);
+  const sections = useMemo(() => {
+    if (!tasks || !now) return [];
+    return groupTasks(tasks as TaskItem[], groupBy, now);
+  }, [tasks, groupBy, now]);
 
   if (tasksLoading) {
     return (
@@ -221,29 +391,44 @@ export function MyTasksContent() {
   return (
     <div className="flex h-[calc(100%-56px)]">
       <div className="flex-1 overflow-y-auto">
-        {/* View Tabs */}
-        <div className="flex items-center gap-1 border-b bg-white px-6 py-1">
-          {([
-            { key: "list", label: "List", icon: List },
-            { key: "board", label: "Board", icon: Columns3 },
-            { key: "calendar", label: "Calendar", icon: Calendar },
-          ] as const).map((v) => (
-            <Button
-              key={v.key}
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "gap-1.5 text-xs",
-                viewMode === v.key
-                  ? "bg-muted text-[#1e1f21]"
-                  : "text-muted-foreground"
-              )}
-              onClick={() => setViewMode(v.key)}
-            >
-              <v.icon className="h-3.5 w-3.5" />
-              {v.label}
-            </Button>
-          ))}
+        {/* View Tabs + Grouping */}
+        <div className="flex items-center justify-between gap-1 border-b bg-white px-6 py-1">
+          <div className="flex items-center gap-1">
+            {([
+              { key: "list", label: "List", icon: List },
+              { key: "board", label: "Board", icon: Columns3 },
+              { key: "calendar", label: "Calendar", icon: Calendar },
+            ] as const).map((v) => (
+              <Button
+                key={v.key}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "gap-1.5 text-xs",
+                  viewMode === v.key
+                    ? "bg-muted text-[#1e1f21]"
+                    : "text-muted-foreground"
+                )}
+                onClick={() => setViewMode(v.key)}
+              >
+                <v.icon className="h-3.5 w-3.5" />
+                {v.label}
+              </Button>
+            ))}
+          </div>
+          {viewMode !== "calendar" && (
+            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupBy)}>
+              <SelectTrigger className="h-7 w-[160px] text-xs">
+                <SelectValue placeholder="Group by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Group by: None</SelectItem>
+                <SelectItem value="due_date">Group by: Due Date</SelectItem>
+                <SelectItem value="project">Group by: Project</SelectItem>
+                <SelectItem value="priority">Group by: Priority</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         <div className="p-6">
@@ -322,25 +507,19 @@ export function MyTasksContent() {
           ) : viewMode === "calendar" ? (
             /* Calendar View */
             <MyTasksCalendar
-              tasks={tasks.filter((t) => t.status === "INCOMPLETE")}
+              tasks={(tasks as TaskItem[]).filter((t) => t.status === "INCOMPLETE")}
               onTaskClick={setSelectedTaskId}
             />
           ) : (
             /* List View */
             <div className="space-y-6">
               {sections.map((section) => (
-                <div key={section.label}>
-                  <h3
-                    className={cn(
-                      "mb-2 text-sm font-semibold",
-                      section.color
-                    )}
-                  >
-                    {section.label}
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">
-                      {section.tasks.length}
-                    </span>
-                  </h3>
+                <CollapsibleSection
+                  key={section.label}
+                  label={section.label}
+                  count={section.tasks.length}
+                  color={section.color}
+                >
                   <div className="space-y-px">
                     {section.tasks.map((task) => (
                       <div
@@ -391,7 +570,7 @@ export function MyTasksContent() {
                       </div>
                     ))}
                   </div>
-                </div>
+                </CollapsibleSection>
               ))}
             </div>
           )}

@@ -16,6 +16,7 @@ import {
   GripVertical,
   Pencil,
   Trash2,
+  Paperclip,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -60,8 +61,26 @@ type TaskItem = {
   assignee: { name: string } | null;
   taskProjects?: { sectionId: string | null }[];
   _count?: { subtasks: number; comments: number; attachments: number };
+  subtasks?: { id: string; status: string }[];
   tags?: { tag: { name: string; color: string } }[];
+  isApproval?: boolean;
+  approvalStatus?: string | null;
+  storyPoints?: number | null;
 };
+
+/** Derive a "priority" from storyPoints for border color (no DB priority field) */
+function getPriorityColor(task: TaskItem): string {
+  const sp = task.storyPoints;
+  if (sp != null && sp >= 8) return "#e53e3e"; // red - high
+  if (sp != null && sp >= 4) return "#eab308"; // yellow - medium
+  if (sp != null && sp >= 1) return "#3b82f6"; // blue - low
+  return "#e2e8f0"; // gray default
+}
+
+function isOverdue(date: string | Date | null): boolean {
+  if (!date) return false;
+  return new Date(date) < new Date(new Date().toDateString());
+}
 
 function SortableTaskCard({
   task,
@@ -97,12 +116,25 @@ function SortableTaskCard({
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
+  const completedSubtasks = task.subtasks?.filter((s) => s.status === "COMPLETE").length ?? 0;
+  const totalSubtasks = task._count?.subtasks ?? 0;
+  const subtaskProgress = totalSubtasks > 0 ? completedSubtasks / totalSubtasks : 0;
+  const hasAttachments = (task._count?.attachments ?? 0) > 0;
+  const overdue = task.status !== "COMPLETE" && isOverdue(task.dueDate);
+  const priorityColor = getPriorityColor(task);
+  const tags = task.tags ?? [];
+  const maxVisibleTags = 2;
+
   return (
     <Card
       ref={setNodeRef}
-      style={style}
+      style={{
+        ...style,
+        borderLeftWidth: "3px",
+        borderLeftColor: priorityColor,
+      }}
       className={cn(
-        "group cursor-pointer border bg-white p-3 shadow-sm transition-shadow hover:shadow-md",
+        "group cursor-pointer border bg-white p-3 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5",
         isSelected && "ring-2 ring-[#4573D2] ring-offset-1"
       )}
       onClick={() => onTaskClick(task.id)}
@@ -139,32 +171,33 @@ function SortableTaskCard({
             <Circle className="h-4 w-4 text-[#cfcbcb] hover:text-green-600" />
           )}
         </button>
-        <span
-          className={cn(
-            "text-sm",
-            task.status === "COMPLETE" &&
-              "text-muted-foreground line-through"
-          )}
-        >
-          {task.title}
-        </span>
-        {(task as any).isApproval && (task as any).approvalStatus && (
+        <div className="min-w-0 flex-1">
+          <span
+            className={cn(
+              "text-sm leading-tight",
+              task.status === "COMPLETE" && "text-muted-foreground line-through"
+            )}
+          >
+            {task.title}
+          </span>
+        </div>
+        {task.isApproval && task.approvalStatus && (
           <span className={cn(
             "ml-1.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-            (task as any).approvalStatus === "APPROVED" && "bg-green-100 text-green-700",
-            (task as any).approvalStatus === "REJECTED" && "bg-red-100 text-red-700",
-            (task as any).approvalStatus === "PENDING" && "bg-yellow-100 text-yellow-700",
-            (task as any).approvalStatus === "CHANGES_REQUESTED" && "bg-orange-100 text-orange-700",
+            task.approvalStatus === "APPROVED" && "bg-green-100 text-green-700",
+            task.approvalStatus === "REJECTED" && "bg-red-100 text-red-700",
+            task.approvalStatus === "PENDING" && "bg-yellow-100 text-yellow-700",
+            task.approvalStatus === "CHANGES_REQUESTED" && "bg-orange-100 text-orange-700",
           )}>
-            {(task as any).approvalStatus === "PENDING" ? "⏳" : (task as any).approvalStatus === "APPROVED" ? "✓" : "✗"}
+            {task.approvalStatus === "PENDING" ? "⏳" : task.approvalStatus === "APPROVED" ? "✓" : "✗"}
           </span>
         )}
       </div>
 
       {/* Tags */}
-      {task.tags && task.tags.length > 0 && (
+      {tags.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1 pl-8">
-          {task.tags.map(({ tag }) => (
+          {tags.slice(0, maxVisibleTags).map(({ tag }) => (
             <span
               key={tag.name}
               className="rounded-full px-1.5 py-0.5 text-[10px] font-medium text-white"
@@ -173,17 +206,48 @@ function SortableTaskCard({
               {tag.name}
             </span>
           ))}
+          {tags.length > maxVisibleTags && (
+            <span className="rounded-full bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">
+              +{tags.length - maxVisibleTags} more
+            </span>
+          )}
         </div>
       )}
 
-      {(task.assignee || task.dueDate) && (
+      {/* Subtask progress bar */}
+      {totalSubtasks > 0 && (
+        <div className="mt-2 pl-8">
+          <div className="flex items-center gap-2">
+            <div className="h-1.5 flex-1 rounded-full bg-gray-100">
+              <div
+                className="h-1.5 rounded-full bg-green-500 transition-all"
+                style={{ width: `${subtaskProgress * 100}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+              {completedSubtasks}/{totalSubtasks}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Footer: due date, attachment icon, assignee */}
+      {(task.assignee || task.dueDate || hasAttachments) && (
         <div className="mt-2 flex items-center justify-between pl-8">
-          <div>
+          <div className="flex items-center gap-2">
             {task.dueDate && (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span className={cn(
+                "flex items-center gap-1 rounded px-1 py-0.5 text-xs",
+                overdue
+                  ? "bg-red-50 text-red-600 font-medium"
+                  : "text-muted-foreground"
+              )}>
                 <Calendar className="h-3 w-3" />
                 {formatDate(task.dueDate)}
               </span>
+            )}
+            {hasAttachments && (
+              <Paperclip className="h-3 w-3 text-muted-foreground" />
             )}
           </div>
           {task.assignee && (
@@ -199,15 +263,10 @@ function SortableTaskCard({
         </div>
       )}
 
-      {/* Subtask/comment count */}
-      {task._count && (task._count.subtasks > 0 || task._count.comments > 0) && (
-        <div className="mt-2 flex items-center gap-3 pl-8 text-xs text-muted-foreground">
-          {task._count.subtasks > 0 && (
-            <span>{task._count.subtasks} subtask{task._count.subtasks > 1 ? "s" : ""}</span>
-          )}
-          {task._count.comments > 0 && (
-            <span>{task._count.comments} comment{task._count.comments > 1 ? "s" : ""}</span>
-          )}
+      {/* Comment count (only if no other footer items shown or comments exist) */}
+      {task._count && task._count.comments > 0 && (
+        <div className="mt-1 pl-8 text-[10px] text-muted-foreground">
+          {task._count.comments} comment{task._count.comments > 1 ? "s" : ""}
         </div>
       )}
     </Card>
@@ -297,7 +356,6 @@ export function ProjectBoardView({
 
     if (!over || active.id === over.id) return;
 
-    // Determine the target section
     const overTask = tasks?.find((t) => t.id === over.id);
     const targetSectionId = overTask
       ? overTask.taskProjects?.[0]?.sectionId
@@ -317,7 +375,7 @@ export function ProjectBoardView({
     }
   };
 
-  const handleDragOver = (event: DragOverEvent) => {
+  const handleDragOver = (_event: DragOverEvent) => {
     // Could add hover effects here
   };
 
@@ -468,7 +526,13 @@ export function ProjectBoardView({
       {/* Drag Overlay */}
       <DragOverlay>
         {activeTask ? (
-          <Card className="w-[260px] border bg-white p-3 shadow-lg">
+          <Card
+            className="w-[260px] border bg-white p-3 shadow-lg"
+            style={{
+              borderLeftWidth: "3px",
+              borderLeftColor: getPriorityColor(activeTask),
+            }}
+          >
             <div className="flex items-start gap-2">
               {activeTask.status === "COMPLETE" ? (
                 <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-600" />
