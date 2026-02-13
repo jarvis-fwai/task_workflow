@@ -4,12 +4,14 @@ import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
   Circle,
+  Plus,
 } from "lucide-react";
 
 interface ProjectCalendarViewProps {
@@ -22,7 +24,21 @@ export function ProjectCalendarView({
   onTaskClick,
 }: ProjectCalendarViewProps) {
   const { data: tasks } = trpc.tasks.list.useQuery({ projectId });
+  const utils = trpc.useUtils();
+  const updateTask = trpc.tasks.update.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [addingDate, setAddingDate] = useState<string | null>(null);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+
+  const createTask = trpc.tasks.create.useMutation({
+    onSuccess: () => {
+      utils.tasks.list.invalidate({ projectId });
+      setNewTaskTitle("");
+      setAddingDate(null);
+    },
+  });
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -140,6 +156,17 @@ export function ProjectCalendarView({
                   "min-h-[100px] bg-white p-1.5",
                   !day.isCurrentMonth && "bg-gray-50"
                 )}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const taskId = e.dataTransfer.getData("taskId");
+                  if (taskId) {
+                    updateTask.mutate({
+                      id: taskId,
+                      dueDate: new Date(day.date.getFullYear(), day.date.getMonth(), day.date.getDate(), 12).toISOString(),
+                    });
+                  }
+                }}
               >
                 <div
                   className={cn(
@@ -154,10 +181,54 @@ export function ProjectCalendarView({
                   {day.date.getDate()}
                 </div>
 
-                <div className="space-y-0.5 clear-both">
+                <div className="space-y-0.5 clear-both group/cell">
+                  {addingDate === day.date.toISOString().split("T")[0] ? (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (newTaskTitle.trim()) {
+                          createTask.mutate({
+                            title: newTaskTitle.trim(),
+                            projectId,
+                            dueDate: new Date(addingDate).toISOString(),
+                          });
+                        }
+                      }}
+                      className="mb-1"
+                    >
+                      <Input
+                        value={newTaskTitle}
+                        onChange={(e) => setNewTaskTitle(e.target.value)}
+                        placeholder="Task name..."
+                        className="h-6 text-[11px]"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            setAddingDate(null);
+                            setNewTaskTitle("");
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!newTaskTitle.trim()) {
+                            setAddingDate(null);
+                            setNewTaskTitle("");
+                          }
+                        }}
+                      />
+                    </form>
+                  ) : (
+                    <button
+                      className="mb-1 hidden w-full items-center justify-center rounded text-[10px] text-muted-foreground hover:bg-muted/50 group-hover/cell:flex"
+                      onClick={() => setAddingDate(day.date.toISOString().split("T")[0])}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  )}
                   {dayTasks.slice(0, 3).map((task) => (
                     <button
                       key={task.id}
+                      draggable
+                      onDragStart={(e) => e.dataTransfer.setData("taskId", task.id)}
                       onClick={() => onTaskClick(task.id)}
                       className={cn(
                         "flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[11px] transition-colors hover:bg-muted/50",
