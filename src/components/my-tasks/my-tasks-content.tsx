@@ -33,7 +33,7 @@ interface TaskItem {
   title: string;
   status: string;
   dueDate: string | Date | null;
-  priority: string | null;
+  priority?: string | null;
   taskProjects?: { project: { id: string; name: string } }[];
   [key: string]: unknown;
 }
