@@ -42,6 +42,24 @@ function calculateNextDueDate(
   return next;
 }
 
+async function logActivity(
+  prisma: any,
+  taskId: string,
+  userId: string,
+  action: string,
+  field?: string,
+  oldValue?: string | null,
+  newValue?: string | null,
+) {
+  try {
+    await prisma.activityLog.create({
+      data: { taskId, userId, action, field, oldValue, newValue },
+    });
+  } catch {
+    // Don't fail task operations due to logging errors
+  }
+}
+
 export const tasksRouter = router({
   list: protectedProcedure
     .input(
@@ -115,6 +133,10 @@ export const tasksRouter = router({
           },
           attachments: {
             orderBy: { createdAt: "desc" },
+          },
+          activityLogs: {
+            orderBy: { createdAt: "asc" },
+            take: 50,
           },
           _count: {
             select: { comments: true, attachments: true, subtasks: true },
@@ -216,6 +238,9 @@ export const tasksRouter = router({
         },
       });
 
+      // Log activity
+      await logActivity(ctx.prisma, task.id, ctx.session.user.id, "created");
+
       // Execute rules for TASK_ADDED
       executeRules(ctx.prisma, "TASK_ADDED", {
         projectId: input.projectId,
@@ -239,6 +264,20 @@ export const tasksRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
+
+      // Log field changes
+      const existing = await ctx.prisma.task.findUnique({ where: { id }, select: { title: true, assigneeId: true, dueDate: true } });
+      if (existing) {
+        if (data.title && data.title !== existing.title) {
+          await logActivity(ctx.prisma, id, ctx.session.user.id, "updated", "title", existing.title, data.title);
+        }
+        if (data.assigneeId !== undefined && data.assigneeId !== existing.assigneeId) {
+          await logActivity(ctx.prisma, id, ctx.session.user.id, "updated", "assignee", existing.assigneeId, data.assigneeId);
+        }
+        if (data.dueDate !== undefined) {
+          await logActivity(ctx.prisma, id, ctx.session.user.id, "updated", "dueDate", existing.dueDate?.toISOString() ?? null, data.dueDate);
+        }
+      }
 
       return ctx.prisma.task.update({
         where: { id },
@@ -270,6 +309,8 @@ export const tasksRouter = router({
           completedAt: new Date(),
         },
       });
+
+      await logActivity(ctx.prisma, input.id, ctx.session.user.id, "completed");
 
       // Execute rules for TASK_COMPLETED
       const taskForRules = await ctx.prisma.task.findUnique({

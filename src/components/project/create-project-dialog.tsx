@@ -65,16 +65,40 @@ export function CreateProjectDialog({
     },
   });
 
+  const { data: templates } = trpc.templates.list.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+
+  const createFromTemplate = trpc.templates.createProjectFromTemplate.useMutation({
+    onSuccess: (project) => {
+      utils.projects.list.invalidate();
+      onOpenChange(false);
+      setName("");
+      router.push(`/projects/${project.id}`);
+    },
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !workspaceId) return;
-    createProject.mutate({
-      name: name.trim(),
-      workspaceId,
-      teamId: teamId || undefined,
-      color,
-      defaultView,
-    });
+    if (selectedTemplate) {
+      createFromTemplate.mutate({
+        templateId: selectedTemplate,
+        workspaceId,
+        teamId: teamId || undefined,
+        name: name.trim(),
+      });
+    } else {
+      createProject.mutate({
+        name: name.trim(),
+        workspaceId,
+        teamId: teamId || undefined,
+        color,
+        defaultView,
+      });
+    }
   };
 
   return (
@@ -94,6 +118,25 @@ export function CreateProjectDialog({
               autoFocus
             />
           </div>
+
+          {templates && templates.length > 0 && (
+            <div className="space-y-2">
+              <Label>Template (optional)</Label>
+              <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Blank project" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Blank project</SelectItem>
+                  {templates.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label>Color</Label>

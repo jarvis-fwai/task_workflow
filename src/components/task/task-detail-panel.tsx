@@ -981,6 +981,25 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           <h3 className="mb-4 text-sm font-medium text-[#6d6e6f]">
             Activity
           </h3>
+
+          {/* Activity Log entries */}
+          {(task as any).activityLogs && (task as any).activityLogs.length > 0 && (
+            <div className="mb-4 space-y-2">
+              {(task as any).activityLogs.map((log: any) => (
+                <div key={log.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="h-1.5 w-1.5 rounded-full bg-gray-300" />
+                  <span>
+                    {log.action === "created" && "Task created"}
+                    {log.action === "completed" && "Task marked complete"}
+                    {log.action === "updated" && log.field && `${log.field} updated`}
+                  </span>
+                  <span>·</span>
+                  <span>{new Date(log.createdAt).toLocaleDateString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {task.comments && task.comments.length > 0 ? (
             <div className="space-y-4">
               {task.comments.map((comment) => {
