@@ -692,6 +692,42 @@ export const tasksRouter = router({
       });
     }),
 
+  addTag: protectedProcedure
+    .input(z.object({ taskId: z.string(), tagName: z.string(), color: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      // Find or create tag
+      const task = await ctx.prisma.task.findUniqueOrThrow({
+        where: { id: input.taskId },
+        select: { workspaceId: true },
+      });
+      let tag = await ctx.prisma.tag.findFirst({
+        where: { name: input.tagName, workspaceId: task.workspaceId },
+      });
+      if (!tag) {
+        tag = await ctx.prisma.tag.create({
+          data: { name: input.tagName, color: input.color || "#4573D2", workspaceId: task.workspaceId },
+        });
+      }
+      // Link tag to task
+      const existing = await ctx.prisma.taskTag.findFirst({
+        where: { taskId: input.taskId, tagId: tag.id },
+      });
+      if (!existing) {
+        await ctx.prisma.taskTag.create({
+          data: { taskId: input.taskId, tagId: tag.id },
+        });
+      }
+      return tag;
+    }),
+
+  removeTag: protectedProcedure
+    .input(z.object({ taskId: z.string(), tagId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.prisma.taskTag.deleteMany({
+        where: { taskId: input.taskId, tagId: input.tagId },
+      });
+    }),
+
   toggleFollow: protectedProcedure
     .input(z.object({ taskId: z.string() }))
     .mutation(async ({ ctx, input }) => {

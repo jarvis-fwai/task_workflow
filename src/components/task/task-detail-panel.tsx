@@ -236,6 +236,14 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
     },
   });
 
+  const addTag = trpc.tasks.addTag.useMutation({
+    onSuccess: () => utils.tasks.get.invalidate({ id: taskId }),
+  });
+
+  const removeTag = trpc.tasks.removeTag.useMutation({
+    onSuccess: () => utils.tasks.get.invalidate({ id: taskId }),
+  });
+
   const createAttachment = trpc.attachments.create.useMutation({
     onSuccess: () => {
       utils.tasks.get.invalidate({ id: taskId });
@@ -650,28 +658,43 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           </div>
 
           {/* Tags */}
-          <div className="flex items-center">
-            <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">
+          <div className="flex items-start">
+            <div className="flex w-32 items-center gap-2 pt-0.5 text-sm text-muted-foreground">
               <Tag className="h-4 w-4" />
               Tags
             </div>
-            <div className="flex flex-wrap gap-1">
-              {task.tags && task.tags.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1">
+              {task.tags && task.tags.length > 0 && (
                 task.tags.map((tt) => (
                   <span
                     key={tt.id}
-                    className="rounded-full px-2 py-0.5 text-xs"
+                    className="group/tag flex items-center gap-1 rounded-full px-2 py-0.5 text-xs"
                     style={{
                       backgroundColor: tt.tag.color + "20",
                       color: tt.tag.color,
                     }}
                   >
                     {tt.tag.name}
+                    <button
+                      className="hidden text-current opacity-60 hover:opacity-100 group-hover/tag:inline"
+                      onClick={() => removeTag.mutate({ taskId, tagId: tt.tag.id })}
+                    >
+                      ×
+                    </button>
                   </span>
                 ))
-              ) : (
-                <span className="text-sm text-muted-foreground">No tags</span>
               )}
+              <button
+                className="rounded-full border border-dashed px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  const name = prompt("Tag name:");
+                  if (name?.trim()) {
+                    addTag.mutate({ taskId, tagName: name.trim() });
+                  }
+                }}
+              >
+                + Tag
+              </button>
             </div>
           </div>
 
