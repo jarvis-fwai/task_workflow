@@ -10,6 +10,7 @@ import { trpc } from "@/lib/trpc";
 import { Toaster } from "@/components/ui/sonner";
 import { UndoProvider } from "@/contexts/undo-context";
 import { BulkSelectionProvider } from "@/contexts/bulk-selection-context";
+import { RealtimeProvider } from "@/components/layout/realtime-provider";
 
 function getBaseUrl() {
   if (typeof window !== "undefined") return "";
@@ -23,8 +24,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 5 * 60 * 1000,
-            refetchOnWindowFocus: false,
+            staleTime: 30 * 1000, // 30s - allow faster refetches for realtime feel
+            refetchOnWindowFocus: true,
           },
         },
       })
@@ -55,7 +56,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
           <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
             <UndoProvider>
               <BulkSelectionProvider>
-                {children}
+                <RealtimeProvider>
+                  {children}
+                </RealtimeProvider>
               </BulkSelectionProvider>
             </UndoProvider>
             <Toaster position="bottom-right" richColors />
