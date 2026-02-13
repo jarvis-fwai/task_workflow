@@ -122,7 +122,7 @@ export function MyTasksContent() {
   const { data: workspaces } = trpc.workspaces.list.useQuery();
   const workspaceId = workspaces?.[0]?.id;
 
-  const { data: tasks } = trpc.tasks.myTasks.useQuery(
+  const { data: tasks, isLoading: tasksLoading } = trpc.tasks.myTasks.useQuery(
     { workspaceId: workspaceId! },
     { enabled: !!workspaceId }
   );
@@ -199,6 +199,24 @@ export function MyTasksContent() {
     { label: "Upcoming", tasks: upcomingTasks, color: "text-[#1e1f21]" },
     { label: "Completed", tasks: completedTasks, color: "text-muted-foreground" },
   ].filter((s) => s.tasks.length > 0);
+
+  if (tasksLoading) {
+    return (
+      <div className="flex h-[calc(100%-56px)]">
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 border-b border-gray-50 py-2.5">
+              <div className="h-4 w-4 animate-pulse rounded-full bg-muted" />
+              <div className="h-3.5 animate-pulse rounded bg-muted" style={{ width: `${120 + Math.random() * 150}px` }} />
+              <div className="flex-1" />
+              <div className="h-6 w-6 animate-pulse rounded-full bg-muted" />
+              <div className="h-3 w-20 animate-pulse rounded bg-muted" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-[calc(100%-56px)]">

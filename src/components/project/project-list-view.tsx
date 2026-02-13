@@ -17,6 +17,8 @@ import {
   Calendar,
 } from "lucide-react";
 import { BulkActionsToolbar } from "@/components/task/bulk-actions-toolbar";
+import { TaskListSkeleton } from "@/components/ui/loading-skeletons";
+import { EmptyTaskList } from "@/components/ui/empty-state";
 
 export type SortRule = { field: string; order: "asc" | "desc" };
 
@@ -31,8 +33,8 @@ export function ProjectListView({
   onTaskClick,
   sortRules = [{ field: "created", order: "desc" }],
 }: ProjectListViewProps) {
-  const { data: sections } = trpc.sections.list.useQuery({ projectId });
-  const { data: tasks } = trpc.tasks.list.useQuery({ projectId });
+  const { data: sections, isLoading: sectionsLoading } = trpc.sections.list.useQuery({ projectId });
+  const { data: tasks, isLoading: tasksLoading } = trpc.tasks.list.useQuery({ projectId });
   const utils = trpc.useUtils();
   const { pushUndo } = useUndo();
 
@@ -180,6 +182,14 @@ export function ProjectListView({
     const d = new Date(date);
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
+
+  if (sectionsLoading || tasksLoading) {
+    return <TaskListSkeleton />;
+  }
+
+  if (sections && sections.length === 0 && (!tasks || tasks.length === 0)) {
+    return <EmptyTaskList onAddTask={() => setAddingTaskInSection("new")} />;
+  }
 
   return (
     <div className="px-6 py-4">

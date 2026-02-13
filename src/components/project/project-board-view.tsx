@@ -26,6 +26,8 @@ import {
 import { Card } from "@/components/ui/card";
 import { useBulkSelection } from "@/contexts/bulk-selection-context";
 import { BulkActionsToolbar } from "@/components/task/bulk-actions-toolbar";
+import { BoardSkeleton } from "@/components/ui/loading-skeletons";
+import { EmptyBoard } from "@/components/ui/empty-state";
 import {
   DndContext,
   DragOverlay,
@@ -216,8 +218,8 @@ export function ProjectBoardView({
   projectId,
   onTaskClick,
 }: ProjectBoardViewProps) {
-  const { data: sections } = trpc.sections.list.useQuery({ projectId });
-  const { data: tasks } = trpc.tasks.list.useQuery({ projectId });
+  const { data: sections, isLoading: sectionsLoading } = trpc.sections.list.useQuery({ projectId });
+  const { data: tasks, isLoading: tasksLoading } = trpc.tasks.list.useQuery({ projectId });
   const utils = trpc.useUtils();
   const { toggle: toggleSelect, isSelected } = useBulkSelection();
 
@@ -324,6 +326,14 @@ export function ProjectBoardView({
     const d = new Date(date);
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
+
+  if (sectionsLoading || tasksLoading) {
+    return <BoardSkeleton />;
+  }
+
+  if (!sections || sections.length === 0) {
+    return <EmptyBoard />;
+  }
 
   return (
     <DndContext
