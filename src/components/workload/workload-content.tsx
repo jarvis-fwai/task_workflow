@@ -107,6 +107,32 @@ export function WorkloadContent() {
           )}
         </p>
 
+        {/* Summary cards */}
+        {workloadData && workloadData.length > 0 && (
+          <div className="mb-6 grid grid-cols-4 gap-4">
+            <div className="rounded-lg border bg-white p-3 dark:bg-card">
+              <p className="text-xs text-muted-foreground">Team Members</p>
+              <p className="text-2xl font-semibold">{workloadData.length}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-3 dark:bg-card">
+              <p className="text-xs text-muted-foreground">Total Tasks</p>
+              <p className="text-2xl font-semibold">{workloadData.reduce((s: number, m: any) => s + m.taskCount, 0)}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-3 dark:bg-card">
+              <p className="text-xs text-muted-foreground">Avg Utilization</p>
+              <p className="text-2xl font-semibold">
+                {Math.round(workloadData.reduce((s: number, m: any) => s + m.utilization, 0) / workloadData.length)}%
+              </p>
+            </div>
+            <div className="rounded-lg border border-red-200 bg-red-50/50 p-3 dark:bg-red-950/20">
+              <p className="text-xs text-red-600">Over Capacity</p>
+              <p className="text-2xl font-semibold text-red-600">
+                {workloadData.filter((m: any) => m.utilization > 100).length}
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-3">
           {workloadData?.map((member) => {
             const utilization = member.utilization;
