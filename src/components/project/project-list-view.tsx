@@ -260,6 +260,9 @@ export function ProjectListView({
               onClick={() => {
                 if (confirm(`Delete section "${section.name}"?`)) {
                   deleteSection.mutate({ id: section.id });
+                  pushUndo(`Section "${section.name}" deleted`, () => {
+                    createSection.mutate({ projectId, name: section.name });
+                  });
                 }
               }}
             >

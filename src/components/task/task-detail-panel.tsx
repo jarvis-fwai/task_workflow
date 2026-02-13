@@ -183,6 +183,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const deleteTask = trpc.tasks.delete.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
       // Capture task data before it's gone for undo
       if (task) {
         const captured = {
