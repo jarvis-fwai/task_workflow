@@ -26,6 +26,7 @@ import { approvalsRouter } from "./routers/approvals";
 import { workloadRouter } from "./routers/workload";
 import { integrationsRouter } from "./routers/integrations";
 import { annotationsRouter } from "./routers/annotations";
+import { presenceRouter } from "./routers/presence";
 
 export const appRouter = router({
   auth: authRouter,
@@ -55,6 +56,7 @@ export const appRouter = router({
   workload: workloadRouter,
   integrations: integrationsRouter,
   annotations: annotationsRouter,
+  presence: presenceRouter,
 });
 
 export type AppRouter = typeof appRouter;

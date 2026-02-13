@@ -48,6 +48,7 @@ model User {
   visitHistory         VisitHistory[]
   userCapacity         UserCapacity[]
   annotations          Annotation[]
+  presence             UserPresence?
 }
 
 model Account {
@@ -886,4 +887,16 @@ model AiCache {
 
   @@unique([resourceType, resourceId])
   @@index([expiresAt])
+}
+
+model UserPresence {
+  id        String   @id @default(cuid())
+  userId    String
+  location  String   // e.g. "project:abc123" or "task:xyz456"
+  lastSeen  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@index([location, lastSeen])
 }

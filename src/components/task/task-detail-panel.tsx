@@ -45,6 +45,7 @@ import { VideoRecorder } from "@/components/comments/video-recorder";
 import { RecurrencePicker } from "@/components/task/recurrence-picker";
 import { useUndo } from "@/contexts/undo-context";
 import { useSession } from "next-auth/react";
+import { usePresence } from "@/hooks/use-presence";
 
 function AssigneePicker({
   currentAssignee,
@@ -116,6 +117,7 @@ interface TaskDetailPanelProps {
 export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const { data: session } = useSession();
   const { data: task, isLoading } = trpc.tasks.get.useQuery({ id: taskId });
+  const presenceViewers = usePresence(taskId ? `task:${taskId}` : null);
   const { data: taskReactions } = trpc.reactions.listForTask.useQuery(
     { taskId },
     { enabled: !!taskId }
@@ -530,6 +532,25 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           <Hash className="h-3 w-3" />
           {task.id.slice(0, 8)}
         </button>
+
+        {/* Presence Indicators */}
+        {presenceViewers.length > 0 && (
+          <div className="flex items-center gap-1.5 rounded-md bg-blue-50 px-2.5 py-1.5 text-xs text-blue-700">
+            <div className="flex -space-x-1.5">
+              {presenceViewers.slice(0, 3).map((v) => (
+                <Avatar key={v.userId} className="h-5 w-5 border-2 border-white">
+                  <AvatarFallback className="bg-blue-500 text-[8px] text-white">
+                    {v.user.name?.split(" ").map((n: string) => n[0]).join("")}
+                  </AvatarFallback>
+                </Avatar>
+              ))}
+            </div>
+            <span>
+              {presenceViewers.map((v) => v.user.name?.split(" ")[0]).join(", ")}{" "}
+              {presenceViewers.length === 1 ? "is" : "are"} viewing this task
+            </span>
+          </div>
+        )}
 
         {/* Title */}
         <Input

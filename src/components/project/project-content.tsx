@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { usePresence } from "@/hooks/use-presence";
 import dynamic from "next/dynamic";
 import { trpc } from "@/lib/trpc";
 import { ProjectHeader } from "./project-header";
@@ -91,6 +92,9 @@ export function ProjectContent({ projectId }: ProjectContentProps) {
     id: projectId,
   });
 
+  // Presence tracking
+  const presenceViewers = usePresence(`project:${projectId}`);
+
   // Track visit for recents (fire once when project loads)
   const trackVisit = trpc.recents.track.useMutation();
   const trackedRef = useRef(false);
@@ -152,6 +156,26 @@ export function ProjectContent({ projectId }: ProjectContentProps) {
             colorBy={colorBy}
             onColorByChange={setColorBy}
           />
+
+          {/* Presence viewers */}
+          {presenceViewers.length > 0 && (
+            <div className="flex items-center gap-1.5 border-b bg-blue-50/50 px-6 py-1.5 text-xs text-blue-600">
+              <div className="flex -space-x-1">
+                {presenceViewers.slice(0, 5).map((v) => (
+                  <div
+                    key={v.userId}
+                    className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-blue-500 text-[8px] font-medium text-white"
+                    title={v.user.name ?? ""}
+                  >
+                    {v.user.name?.split(" ").map((n: string) => n[0]).join("")}
+                  </div>
+                ))}
+              </div>
+              <span>
+                {presenceViewers.map((v) => v.user.name?.split(" ")[0]).join(", ")} also viewing
+              </span>
+            </div>
+          )}
 
           <div className="h-[calc(100%-104px)] overflow-y-auto">
             {activeView === "list" && (
