@@ -46,6 +46,24 @@ export function ProjectListView({
   );
   const [newTaskTitle, setNewTaskTitle] = useState("");
 
+  const createSection = trpc.sections.create.useMutation({
+    onSuccess: () => utils.sections.list.invalidate({ projectId }),
+  });
+
+  const deleteSection = trpc.sections.delete.useMutation({
+    onSuccess: () => {
+      utils.sections.list.invalidate({ projectId });
+      utils.tasks.list.invalidate({ projectId });
+    },
+  });
+
+  const updateSection = trpc.sections.update.useMutation({
+    onSuccess: () => utils.sections.list.invalidate({ projectId }),
+  });
+
+  const [renamingSectionId, setRenamingSectionId] = useState<string | null>(null);
+  const [sectionName, setSectionName] = useState("");
+
   const createTask = trpc.tasks.create.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate({ projectId });
@@ -177,18 +195,58 @@ export function ProjectListView({
       {sections?.map((section) => (
         <div key={section.id} className="mb-4">
           {/* Section Header */}
-          <button
-            onClick={() => toggleSection(section.id)}
-            className="group flex w-full items-center gap-2 py-2 text-sm font-semibold text-[#1e1f21]"
-          >
-            <ChevronRight
-              className={cn(
-                "h-3.5 w-3.5 transition-transform",
-                expandedSections.has(section.id) && "rotate-90"
-              )}
-            />
-            {section.name}
-          </button>
+          <div className="group flex w-full items-center gap-2 py-2">
+            <button onClick={() => toggleSection(section.id)}>
+              <ChevronRight
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform",
+                  expandedSections.has(section.id) && "rotate-90"
+                )}
+              />
+            </button>
+            {renamingSectionId === section.id ? (
+              <input
+                className="border-b border-blue-500 bg-transparent text-sm font-semibold text-[#1e1f21] outline-none"
+                value={sectionName}
+                onChange={(e) => setSectionName(e.target.value)}
+                onBlur={() => {
+                  if (sectionName.trim() && sectionName !== section.name) {
+                    updateSection.mutate({ id: section.id, name: sectionName.trim() });
+                  }
+                  setRenamingSectionId(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") setRenamingSectionId(null);
+                }}
+                autoFocus
+              />
+            ) : (
+              <button
+                className="text-sm font-semibold text-[#1e1f21]"
+                onDoubleClick={() => {
+                  setRenamingSectionId(section.id);
+                  setSectionName(section.name);
+                }}
+                onClick={() => toggleSection(section.id)}
+              >
+                {section.name}
+              </button>
+            )}
+            <span className="text-xs text-muted-foreground">
+              {getTasksForSection(section.id).length}
+            </span>
+            <button
+              className="ml-auto text-xs text-muted-foreground opacity-0 hover:text-red-500 group-hover:opacity-100"
+              onClick={() => {
+                if (confirm(`Delete section "${section.name}"?`)) {
+                  deleteSection.mutate({ id: section.id });
+                }
+              }}
+            >
+              ×
+            </button>
+          </div>
 
           {expandedSections.has(section.id) && (
             <div>
@@ -303,6 +361,20 @@ export function ProjectListView({
           )}
         </div>
       ))}
+
+      {/* Add Section */}
+      <button
+        onClick={() => {
+          const name = prompt("Section name:");
+          if (name?.trim()) {
+            createSection.mutate({ projectId, name: name.trim() });
+          }
+        }}
+        className="flex items-center gap-2 px-6 py-3 text-sm text-muted-foreground hover:text-[#1e1f21]"
+      >
+        <Plus className="h-4 w-4" />
+        Add section
+      </button>
 
       <BulkActionsToolbar
         projectId={projectId}

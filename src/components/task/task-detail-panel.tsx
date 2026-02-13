@@ -589,6 +589,26 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
             />
           </div>
 
+          {/* Start Date */}
+          <div className="flex items-center">
+            <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">
+              <CalendarDays className="h-4 w-4" />
+              Start date
+            </div>
+            <Input
+              type="date"
+              className="h-7 w-40 text-sm"
+              defaultValue={task.startDate ? new Date(task.startDate).toISOString().split("T")[0] : ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                updateTask.mutate({
+                  id: taskId,
+                  startDate: val ? new Date(val).toISOString() : null,
+                });
+              }}
+            />
+          </div>
+
           {/* Estimated Hours */}
           <div className="flex items-center">
             <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">
