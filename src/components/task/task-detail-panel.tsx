@@ -174,6 +174,13 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
     },
   });
 
+  const createAttachment = trpc.attachments.create.useMutation({
+    onSuccess: () => {
+      utils.tasks.get.invalidate({ id: taskId });
+      toast.success("File attached");
+    },
+  });
+
   const removeDependency = trpc.tasks.removeDependency.useMutation({
     onSuccess: () => {
       utils.tasks.get.invalidate({ id: taskId });
@@ -746,11 +753,42 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
         </div>
 
         {/* Attachments */}
-        {task.attachments && (task.attachments as any[]).length > 0 && (
-          <div className="mt-6">
-            <h3 className="mb-2 text-sm font-medium text-[#6d6e6f]">
+        <div className="mt-6">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-medium text-[#6d6e6f]">
               Attachments
             </h3>
+            <label className="cursor-pointer rounded px-2 py-1 text-xs text-[#4573D2] hover:bg-blue-50">
+              <Paperclip className="mr-1 inline h-3 w-3" />
+              Attach file
+              <input
+                type="file"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const formData = new FormData();
+                  formData.append("file", file);
+                  try {
+                    const res = await fetch("/api/upload", { method: "POST", body: formData });
+                    const data = await res.json();
+                    if (data.url) {
+                      createAttachment.mutate({
+                        taskId,
+                        fileName: data.fileName,
+                        fileUrl: data.url,
+                        fileSize: data.fileSize,
+                        mimeType: data.mimeType,
+                      });
+                    }
+                  } catch {
+                    toast.error("Failed to upload file");
+                  }
+                }}
+              />
+            </label>
+          </div>
+          {task.attachments && (task.attachments as any[]).length > 0 ? (
             <div className="space-y-1">
               {(task.attachments as any[]).map((att: any) => {
                 const isImage = att.mimeType?.startsWith("image/");
@@ -797,8 +835,10 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                 );
               })}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="text-xs text-muted-foreground">No attachments. Drag and drop or click to attach files.</p>
+          )}
+        </div>
 
         {/* Subtasks */}
         <div className="mt-6">

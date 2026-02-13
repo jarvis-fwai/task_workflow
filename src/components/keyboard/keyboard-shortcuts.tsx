@@ -15,21 +15,24 @@ const shortcutCategories = [
     name: "Navigation",
     shortcuts: [
       { description: "Search", keys: ["⌘", "K"] },
-      { description: "Inbox", keys: ["Tab", "I"] },
+      { description: "Go to Inbox", keys: ["Tab", "I"] },
+      { description: "Go to My Tasks", keys: ["Tab", "M"] },
+      { description: "Go to Home", keys: ["Tab", "H"] },
     ],
   },
   {
     name: "Tasks",
     shortcuts: [
-      { description: "Quick add", keys: ["Tab", "Q"] },
-      { description: "Open task", keys: ["Enter"] },
-      { description: "Complete task", keys: ["Space"] },
+      { description: "Quick add task", keys: ["Tab", "Q"] },
+      { description: "Open selected task", keys: ["Enter"] },
+      { description: "Complete/uncomplete task", keys: ["Space"] },
+      { description: "Assign to me", keys: ["Tab", "A"] },
     ],
   },
   {
     name: "General",
     shortcuts: [
-      { description: "Close", keys: ["Esc"] },
+      { description: "Close panel/modal", keys: ["Esc"] },
       { description: "Shortcuts reference", keys: ["?"] },
     ],
   },
@@ -65,17 +68,25 @@ export function KeyboardShortcuts() {
         return;
       }
 
-      if (event.key === "q" || event.key === "Q") {
-        const now = Date.now();
-        if (
-          lastKeyRef.current === "Tab" &&
-          now - lastKeyTimeRef.current <= 300
-        ) {
+      const now = Date.now();
+      const isTabSequence = lastKeyRef.current === "Tab" && now - lastKeyTimeRef.current <= 500;
+
+      if (isTabSequence) {
+        const key = event.key.toLowerCase();
+        if (key === "q") {
           window.dispatchEvent(new CustomEvent("quick-add-task"));
-          lastKeyRef.current = null;
-          lastKeyTimeRef.current = 0;
-          return;
+        } else if (key === "i") {
+          window.location.href = "/inbox";
+        } else if (key === "m") {
+          window.location.href = "/my-tasks";
+        } else if (key === "h") {
+          window.location.href = "/home";
+        } else if (key === "a") {
+          window.dispatchEvent(new CustomEvent("assign-to-me"));
         }
+        lastKeyRef.current = null;
+        lastKeyTimeRef.current = 0;
+        return;
       }
 
       // ?: open shortcuts reference dialog
