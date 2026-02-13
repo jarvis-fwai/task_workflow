@@ -22,7 +22,7 @@ export const commentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.comment.create({
+      const comment = await ctx.prisma.comment.create({
         data: {
           taskId: input.taskId,
           authorId: ctx.session.user.id,
@@ -32,6 +32,36 @@ export const commentsRouter = router({
         },
         include: { author: true },
       });
+
+      // Notify task followers about the comment
+      try {
+        const task = await ctx.prisma.task.findUnique({
+          where: { id: input.taskId },
+          select: { title: true },
+        });
+        const followers = await ctx.prisma.taskFollower.findMany({
+          where: { taskId: input.taskId },
+          select: { userId: true },
+        });
+        for (const f of followers) {
+          if (f.userId !== ctx.session.user.id) {
+            await ctx.prisma.notification.create({
+              data: {
+                userId: f.userId,
+                type: "COMMENT_ADDED",
+                message: `${comment.author.name} commented on "${task?.title}"`,
+                resourceId: input.taskId,
+                resourceType: "task",
+                actorId: ctx.session.user.id,
+              },
+            });
+          }
+        }
+      } catch {
+        // Don't fail comment creation
+      }
+
+      return comment;
     }),
 
   update: protectedProcedure

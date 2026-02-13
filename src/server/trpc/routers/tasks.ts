@@ -42,6 +42,26 @@ function calculateNextDueDate(
   return next;
 }
 
+async function createNotification(
+  prisma: any,
+  userId: string,
+  type: string,
+  message: string,
+  resourceId: string,
+  resourceType: string,
+  actorId?: string,
+) {
+  try {
+    // Don't notify yourself
+    if (actorId && actorId === userId) return;
+    await prisma.notification.create({
+      data: { userId, type, message, resourceId, resourceType, actorId },
+    });
+  } catch {
+    // Don't fail operations due to notification errors
+  }
+}
+
 async function logActivity(
   prisma: any,
   taskId: string,
@@ -241,6 +261,15 @@ export const tasksRouter = router({
       // Log activity
       await logActivity(ctx.prisma, task.id, ctx.session.user.id, "created");
 
+      // Notify assignee
+      if (input.assigneeId && input.assigneeId !== ctx.session.user.id) {
+        await createNotification(
+          ctx.prisma, input.assigneeId, "TASK_ASSIGNED",
+          `You were assigned to "${input.title}"`,
+          task.id, "task", ctx.session.user.id,
+        );
+      }
+
       // Execute rules for TASK_ADDED
       executeRules(ctx.prisma, "TASK_ADDED", {
         projectId: input.projectId,
@@ -273,6 +302,14 @@ export const tasksRouter = router({
         }
         if (data.assigneeId !== undefined && data.assigneeId !== existing.assigneeId) {
           await logActivity(ctx.prisma, id, ctx.session.user.id, "updated", "assignee", existing.assigneeId, data.assigneeId);
+          // Notify new assignee
+          if (data.assigneeId) {
+            await createNotification(
+              ctx.prisma, data.assigneeId, "TASK_ASSIGNED",
+              `You were assigned to "${existing.title}"`,
+              id, "task", ctx.session.user.id,
+            );
+          }
         }
         if (data.dueDate !== undefined) {
           await logActivity(ctx.prisma, id, ctx.session.user.id, "updated", "dueDate", existing.dueDate?.toISOString() ?? null, data.dueDate);
@@ -311,6 +348,19 @@ export const tasksRouter = router({
       });
 
       await logActivity(ctx.prisma, input.id, ctx.session.user.id, "completed");
+
+      // Notify followers
+      const followers = await ctx.prisma.taskFollower.findMany({
+        where: { taskId: input.id },
+        select: { userId: true },
+      });
+      for (const f of followers) {
+        await createNotification(
+          ctx.prisma, f.userId, "TASK_COMPLETED",
+          `Task "${completedTask.title}" was completed`,
+          input.id, "task", ctx.session.user.id,
+        );
+      }
 
       // Execute rules for TASK_COMPLETED
       const taskForRules = await ctx.prisma.task.findUnique({
