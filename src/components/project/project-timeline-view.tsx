@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -19,8 +19,40 @@ export function ProjectTimelineView({
   const { data: sections, isLoading: sl } = trpc.sections.list.useQuery({ projectId });
   const { data: tasks, isLoading: tl } = trpc.tasks.list.useQuery({ projectId });
   const scrollRef = useRef<HTMLDivElement>(null);
+  const utils = trpc.useUtils();
 
   const [weeksOffset, setWeeksOffset] = useState(0);
+  const [hoveredDep, setHoveredDep] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<{
+    taskId: string;
+    edge: "start" | "end";
+    initialX: number;
+    initialDate: Date;
+  } | null>(null);
+
+  const updateTask = trpc.tasks.update.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
+
+  // Fetch dependency data for all tasks
+  const taskIds = tasks?.map((t) => t.id) ?? [];
+  const dependencyQueries = trpc.useQueries((t) =>
+    taskIds.map((id) => t.tasks.get({ id }))
+  );
+
+  // Build dependency map: taskId -> dependsOnTaskIds[]
+  const dependencyMap = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    dependencyQueries.forEach((q) => {
+      if (q.data) {
+        const deps = (q.data as any).dependsOn;
+        if (deps && Array.isArray(deps)) {
+          map[q.data.id] = deps.map((d: any) => d.dependsOnTaskId);
+        }
+      }
+    });
+    return map;
+  }, [dependencyQueries]);
 
   // Generate date range: 12 weeks centered around today
   const dateRange = useMemo(() => {
@@ -119,6 +151,108 @@ export function ProjectTimelineView({
       });
     });
   });
+
+  // Build row index map for dependency arrows
+  const rowIndexMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    rows.forEach((row, i) => {
+      if (row.type === "task") map[row.id] = i;
+    });
+    return map;
+  }, [rows]);
+
+  // Generate dependency arrows
+  const arrows = useMemo(() => {
+    const result: {
+      id: string;
+      fromTaskId: string;
+      toTaskId: string;
+      path: string;
+    }[] = [];
+
+    for (const [taskId, deps] of Object.entries(dependencyMap)) {
+      for (const depId of deps) {
+        const fromRow = rowIndexMap[depId];
+        const toRow = rowIndexMap[taskId];
+        if (fromRow === undefined || toRow === undefined) continue;
+
+        const fromTask = rows[fromRow]?.task;
+        const toTask = rows[toRow]?.task;
+        if (!fromTask || !toTask) continue;
+
+        const fromBar = getBarPosition(fromTask.startDate, fromTask.dueDate);
+        const toBar = getBarPosition(toTask.startDate, toTask.dueDate);
+        if (!fromBar || !toBar) continue;
+
+        // Arrow from end of blocking task to start of blocked task
+        const fromX = fromBar.left + fromBar.width;
+        const fromY = fromRow * rowHeight + rowHeight / 2;
+        const toX = toBar.left;
+        const toY = toRow * rowHeight + rowHeight / 2;
+
+        // Bezier curve
+        const midX = (fromX + toX) / 2;
+        const path = `M ${fromX} ${fromY} C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`;
+
+        result.push({
+          id: `${depId}-${taskId}`,
+          fromTaskId: depId,
+          toTaskId: taskId,
+          path,
+        });
+      }
+    }
+
+    return result;
+  }, [dependencyMap, rowIndexMap, rows, dateRange]);
+
+  // Drag handle logic
+  const handleDragStart = useCallback(
+    (taskId: string, edge: "start" | "end", e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const task = tasks?.find((t) => t.id === taskId);
+      if (!task) return;
+
+      const initialDate =
+        edge === "start"
+          ? new Date(task.startDate || task.dueDate || new Date())
+          : new Date(task.dueDate || task.startDate || new Date());
+
+      setDragging({ taskId, edge, initialX: e.clientX, initialDate });
+
+      const handleMouseMove = (ev: MouseEvent) => {
+        const dx = ev.clientX - e.clientX;
+        const daysDelta = Math.round(dx / dayWidth);
+        const newDate = new Date(initialDate);
+        newDate.setDate(newDate.getDate() + daysDelta);
+        // We'll apply on mouseup
+      };
+
+      const handleMouseUp = (ev: MouseEvent) => {
+        const dx = ev.clientX - e.clientX;
+        const daysDelta = Math.round(dx / dayWidth);
+        if (daysDelta !== 0) {
+          const newDate = new Date(initialDate);
+          newDate.setDate(newDate.getDate() + daysDelta);
+          const isoDate = newDate.toISOString();
+
+          if (edge === "start") {
+            updateTask.mutate({ id: taskId, startDate: isoDate });
+          } else {
+            updateTask.mutate({ id: taskId, dueDate: isoDate });
+          }
+        }
+        setDragging(null);
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+    },
+    [tasks, dayWidth, updateTask]
+  );
 
   if (sl || tl) {
     return (
@@ -299,6 +433,55 @@ export function ProjectTimelineView({
                 />
               ))}
 
+              {/* Dependency Arrows SVG */}
+              <svg
+                className="pointer-events-none absolute inset-0 z-10"
+                style={{
+                  width: dateRange.length * dayWidth,
+                  height: rows.length * rowHeight,
+                }}
+              >
+                <defs>
+                  <marker
+                    id="arrowhead"
+                    markerWidth="8"
+                    markerHeight="6"
+                    refX="8"
+                    refY="3"
+                    orient="auto"
+                  >
+                    <polygon points="0 0, 8 3, 0 6" fill="#9CA3AF" />
+                  </marker>
+                  <marker
+                    id="arrowhead-hover"
+                    markerWidth="8"
+                    markerHeight="6"
+                    refX="8"
+                    refY="3"
+                    orient="auto"
+                  >
+                    <polygon points="0 0, 8 3, 0 6" fill="#4573D2" />
+                  </marker>
+                </defs>
+                {arrows.map((arrow) => (
+                  <path
+                    key={arrow.id}
+                    d={arrow.path}
+                    fill="none"
+                    stroke={hoveredDep === arrow.id ? "#4573D2" : "#9CA3AF"}
+                    strokeWidth={hoveredDep === arrow.id ? 2 : 1.5}
+                    markerEnd={
+                      hoveredDep === arrow.id
+                        ? "url(#arrowhead-hover)"
+                        : "url(#arrowhead)"
+                    }
+                    className="pointer-events-auto cursor-pointer transition-colors"
+                    onMouseEnter={() => setHoveredDep(arrow.id)}
+                    onMouseLeave={() => setHoveredDep(null)}
+                  />
+                ))}
+              </svg>
+
               {rows.map((row, rowIndex) => (
                 <div
                   key={row.id}
@@ -351,7 +534,7 @@ export function ProjectTimelineView({
 
                     return (
                       <div
-                        className="absolute cursor-pointer rounded-sm transition-opacity hover:opacity-80"
+                        className="group/bar absolute cursor-pointer rounded-sm transition-opacity hover:opacity-80"
                         style={{
                           left: bar.left,
                           width: Math.max(bar.width, dayWidth),
@@ -364,9 +547,23 @@ export function ProjectTimelineView({
                         }}
                         onClick={() => onTaskClick(row.id)}
                       >
-                        <span className="truncate px-2 text-xs font-medium leading-6 text-white">
+                        {/* Left drag handle (start date) */}
+                        <div
+                          className="absolute left-0 top-0 z-30 h-full w-2 cursor-col-resize rounded-l-sm bg-black/0 hover:bg-black/20 opacity-0 group-hover/bar:opacity-100 transition-opacity"
+                          onMouseDown={(e) => handleDragStart(row.id, "start", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+
+                        <span className="truncate px-3 text-xs font-medium leading-6 text-white">
                           {row.name}
                         </span>
+
+                        {/* Right drag handle (end date) */}
+                        <div
+                          className="absolute right-0 top-0 z-30 h-full w-2 cursor-col-resize rounded-r-sm bg-black/0 hover:bg-black/20 opacity-0 group-hover/bar:opacity-100 transition-opacity"
+                          onMouseDown={(e) => handleDragStart(row.id, "end", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
                       </div>
                     );
                   })()}

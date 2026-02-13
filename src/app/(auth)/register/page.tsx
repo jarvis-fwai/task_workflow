@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -8,9 +8,54 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 
 const googleEnabled = process.env.NEXT_PUBLIC_GOOGLE_ENABLED === "true";
+
+function getErrorMessage(err: any): string {
+  const msg = err?.message ?? "";
+
+  // Duplicate email
+  if (
+    msg.toLowerCase().includes("already exists") ||
+    msg.toLowerCase().includes("conflict") ||
+    msg.toLowerCase().includes("duplicate") ||
+    err?.data?.code === "CONFLICT"
+  ) {
+    return "An account with this email already exists";
+  }
+
+  // Validation errors from zod
+  if (msg.includes("too_small") || msg.includes("at least 8")) {
+    return "Password must be at least 8 characters";
+  }
+  if (msg.includes("invalid_string") || msg.includes("Invalid email")) {
+    return "Please enter a valid email address";
+  }
+  if (msg.includes("Name is required")) {
+    return "Name is required";
+  }
+
+  // Network / connection errors
+  if (
+    msg.toLowerCase().includes("fetch") ||
+    msg.toLowerCase().includes("network") ||
+    msg.toLowerCase().includes("failed to fetch") ||
+    msg.toLowerCase().includes("econnrefused")
+  ) {
+    return "Connection failed, please try again";
+  }
+
+  // Fallback — show the server message if available
+  return msg || "Something went wrong. Please try again.";
+}
+
+interface ValidationErrors {
+  name?: string;
+  email?: string;
+  password?: string;
+}
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -18,6 +63,33 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const validation = useMemo((): ValidationErrors => {
+    const errs: ValidationErrors = {};
+    if (touched.name && !name.trim()) {
+      errs.name = "Name is required";
+    }
+    if (touched.email && email) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errs.email = "Please enter a valid email address";
+      }
+    }
+    if (touched.email && !email) {
+      errs.email = "Email is required";
+    }
+    if (touched.password && password) {
+      if (password.length < 8) {
+        errs.password = "Password must be at least 8 characters";
+      }
+    }
+    if (touched.password && !password) {
+      errs.password = "Password is required";
+    }
+    return errs;
+  }, [name, email, password, touched]);
+
+  const hasValidationErrors = Object.keys(validation).length > 0;
 
   const registerMutation = trpc.auth.register.useMutation({
     onSuccess: async () => {
@@ -29,17 +101,41 @@ export default function RegisterPage() {
       if (result?.ok) {
         router.push("/home");
         router.refresh();
+      } else {
+        setError("Account created but login failed. Please try logging in.");
       }
     },
     onError: (err) => {
-      setError(err.message);
+      setError(getErrorMessage(err));
     },
   });
+
+  const handleBlur = (field: string) => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    registerMutation.mutate({ name, email, password });
+
+    // Mark all fields as touched
+    setTouched({ name: true, email: true, password: true });
+
+    // Client-side validation
+    if (!name.trim()) {
+      setError("Name is required");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Please enter a valid email address");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters");
+      return;
+    }
+
+    registerMutation.mutate({ name: name.trim(), email: email.trim(), password });
   };
 
   const handleGoogleSignIn = () => {
@@ -105,9 +201,14 @@ export default function RegisterPage() {
             placeholder="Your full name"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            onBlur={() => handleBlur("name")}
             required
             autoFocus
+            className={cn(validation.name && "border-destructive")}
           />
+          {validation.name && (
+            <p className="text-xs text-destructive">{validation.name}</p>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -118,8 +219,13 @@ export default function RegisterPage() {
             placeholder="name@company.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            onBlur={() => handleBlur("email")}
             required
+            className={cn(validation.email && "border-destructive")}
           />
+          {validation.email && (
+            <p className="text-xs text-destructive">{validation.email}</p>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -130,17 +236,40 @@ export default function RegisterPage() {
             placeholder="At least 8 characters"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            onBlur={() => handleBlur("password")}
             required
             minLength={8}
+            className={cn(validation.password && "border-destructive")}
           />
+          {validation.password && (
+            <p className="text-xs text-destructive">{validation.password}</p>
+          )}
+          {touched.password && password.length > 0 && password.length < 8 && (
+            <div className="flex gap-1 mt-1">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    "h-1 flex-1 rounded-full",
+                    password.length >= (i + 1) * 2 ? "bg-yellow-500" : "bg-gray-200",
+                    password.length >= 8 && "bg-green-500"
+                  )}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3">
+            <p className="text-sm text-destructive">{error}</p>
+          </div>
+        )}
 
         <Button
           type="submit"
           className="w-full bg-[#4573D2] py-5 hover:bg-[#3A63B8]"
-          disabled={registerMutation.isPending}
+          disabled={registerMutation.isPending || hasValidationErrors}
         >
           {registerMutation.isPending ? "Creating account..." : "Sign up"}
         </Button>

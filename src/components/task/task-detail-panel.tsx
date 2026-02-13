@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -133,6 +133,9 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const [showRecurrence, setShowRecurrence] = useState(false);
   const [showAddDep, setShowAddDep] = useState(false);
   const [depSearch, setDepSearch] = useState("");
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [deletingAttId, setDeletingAttId] = useState<string | null>(null);
 
   const updateTask = trpc.tasks.update.useMutation({
     onSuccess: () => {
@@ -253,6 +256,36 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
       toast.success("File attached");
     },
   });
+
+  const deleteAttachment = trpc.attachments.delete.useMutation({
+    onSuccess: () => {
+      utils.tasks.get.invalidate({ id: taskId });
+      toast.success("Attachment deleted");
+      setDeletingAttId(null);
+    },
+  });
+
+  const handleFileDrop = useCallback(async (files: FileList) => {
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.url) {
+          createAttachment.mutate({
+            taskId,
+            fileName: data.fileName,
+            fileUrl: data.url,
+            fileSize: data.fileSize,
+            mimeType: data.mimeType,
+          });
+        }
+      } catch {
+        toast.error(`Failed to upload ${file.name}`);
+      }
+    }
+  }, [taskId, createAttachment]);
 
   const removeDependency = trpc.tasks.removeDependency.useMutation({
     onSuccess: () => {
@@ -870,80 +903,122 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
               Attach file
               <input
                 type="file"
+                multiple
                 className="hidden"
                 onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const formData = new FormData();
-                  formData.append("file", file);
-                  try {
-                    const res = await fetch("/api/upload", { method: "POST", body: formData });
-                    const data = await res.json();
-                    if (data.url) {
-                      createAttachment.mutate({
-                        taskId,
-                        fileName: data.fileName,
-                        fileUrl: data.url,
-                        fileSize: data.fileSize,
-                        mimeType: data.mimeType,
-                      });
-                    }
-                  } catch {
-                    toast.error("Failed to upload file");
-                  }
+                  if (e.target.files) await handleFileDrop(e.target.files);
                 }}
               />
             </label>
           </div>
-          {task.attachments && (task.attachments as any[]).length > 0 ? (
-            <div className="space-y-1">
+
+          {/* Drag & Drop Zone */}
+          <div
+            className={cn(
+              "rounded-lg border-2 border-dashed p-4 text-center transition-colors",
+              isDragOver
+                ? "border-[#4573D2] bg-blue-50"
+                : "border-gray-200 hover:border-gray-300"
+            )}
+            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={async (e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+              if (e.dataTransfer.files.length > 0) {
+                await handleFileDrop(e.dataTransfer.files);
+              }
+            }}
+          >
+            <Paperclip className="mx-auto h-5 w-5 text-muted-foreground" />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {isDragOver ? "Drop files to upload" : "Drop files here or click to upload"}
+            </p>
+          </div>
+
+          {/* Attachment List */}
+          {task.attachments && (task.attachments as any[]).length > 0 && (
+            <div className="mt-3 space-y-2">
               {(task.attachments as any[]).map((att: any) => {
                 const isImage = att.mimeType?.startsWith("image/");
+                const isPdf = att.mimeType === "application/pdf";
                 return (
-                  <div
-                    key={att.id}
-                    className={cn(
-                      "flex items-center gap-2 rounded bg-muted/30 px-3 py-2",
-                      isImage && "cursor-pointer hover:bg-muted/50"
-                    )}
-                    onClick={
-                      isImage
-                        ? () =>
-                            setProofingAttachment({
-                              id: att.id,
-                              url: att.fileUrl,
-                              name: att.fileName,
-                            })
-                        : undefined
-                    }
-                  >
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                    <span className="flex-1 truncate text-sm">
-                      {att.fileName}
-                    </span>
+                  <div key={att.id} className="group/att rounded-lg border bg-white p-2">
+                    {/* Image thumbnail preview */}
                     {isImage && (
-                      <span className="text-[10px] text-[#4573D2]">
-                        Proof
-                      </span>
+                      <div
+                        className="mb-2 cursor-pointer overflow-hidden rounded"
+                        onClick={() => setLightboxUrl(att.fileUrl)}
+                      >
+                        <img
+                          src={att.fileUrl}
+                          alt={att.fileName}
+                          className="h-32 w-full object-cover transition-transform hover:scale-105"
+                        />
+                      </div>
                     )}
-                    <span className="text-xs text-muted-foreground">
-                      {(att.fileSize / 1024).toFixed(0)} KB
-                    </span>
-                    <a
-                      href={att.fileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-muted-foreground hover:text-[#4573D2]"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                    </a>
+                    <div className="flex items-center gap-2">
+                      {isPdf ? (
+                        <FileText className="h-4 w-4 shrink-0 text-red-500" />
+                      ) : isImage ? (
+                        <FileText className="h-4 w-4 shrink-0 text-blue-500" />
+                      ) : (
+                        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="flex-1 truncate text-sm">{att.fileName}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {att.fileSize < 1024 * 1024
+                          ? `${(att.fileSize / 1024).toFixed(0)} KB`
+                          : `${(att.fileSize / (1024 * 1024)).toFixed(1)} MB`}
+                      </span>
+                      {isImage && (
+                        <button
+                          className="text-[10px] text-[#4573D2] hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setProofingAttachment({ id: att.id, url: att.fileUrl, name: att.fileName });
+                          }}
+                        >
+                          Proof
+                        </button>
+                      )}
+                      <a
+                        href={att.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-muted-foreground hover:text-[#4573D2]"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </a>
+                      {deletingAttId === att.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            className="rounded bg-red-500 px-1.5 py-0.5 text-[10px] text-white hover:bg-red-600"
+                            onClick={(e) => { e.stopPropagation(); deleteAttachment.mutate({ id: att.id }); }}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            className="text-[10px] text-muted-foreground hover:text-foreground"
+                            onClick={(e) => { e.stopPropagation(); setDeletingAttId(null); }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="text-muted-foreground opacity-0 transition-opacity group-hover/att:opacity-100 hover:text-red-500"
+                          onClick={(e) => { e.stopPropagation(); setDeletingAttId(att.id); }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">No attachments. Drag and drop or click to attach files.</p>
           )}
         </div>
 
@@ -1285,6 +1360,29 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
       </div>
 
       {/* Image Proofing Overlay */}
+      {/* Lightbox Modal */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <div className="relative max-h-[90vh] max-w-[90vw]">
+            <button
+              className="absolute -top-8 right-0 text-white hover:text-gray-300"
+              onClick={() => setLightboxUrl(null)}
+            >
+              <X className="h-6 w-6" />
+            </button>
+            <img
+              src={lightboxUrl}
+              alt="Preview"
+              className="max-h-[85vh] max-w-[85vw] rounded object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        </div>
+      )}
+
       {proofingAttachment && (
         <ImageProofing
           attachmentId={proofingAttachment.id}
