@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
+import { FormBuilder } from "@/components/forms/form-builder";
 
 interface ProjectWorkflowViewProps {
   projectId: string;
@@ -221,6 +222,11 @@ export function ProjectWorkflowView({ projectId }: ProjectWorkflowViewProps) {
             </p>
           </div>
         )}
+      </div>
+
+      {/* Forms Section */}
+      <div className="mt-8">
+        <FormBuilder projectId={projectId} />
       </div>
     </div>
   );

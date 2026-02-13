@@ -32,6 +32,7 @@ import {
   Group,
   Plus,
   X,
+  LayoutTemplate,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -116,6 +117,12 @@ export function ProjectHeader({
       router.push("/home");
     },
     onError: () => toast.error("Failed to delete project"),
+  });
+
+  const saveAsTemplate = trpc.templates.saveFromProject.useMutation({
+    onSuccess: () => {
+      toast.success("Project saved as template");
+    },
   });
 
   const duplicateProject = trpc.projects.duplicate.useMutation({
@@ -276,6 +283,20 @@ export function ProjectHeader({
                 >
                   <CopyPlus className="mr-2 h-4 w-4" />
                   Duplicate project
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    const name = prompt("Template name:", project.name);
+                    if (name) {
+                      saveAsTemplate.mutate({
+                        projectId: project.id,
+                        name,
+                      });
+                    }
+                  }}
+                >
+                  <LayoutTemplate className="mr-2 h-4 w-4" />
+                  Save as template
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"

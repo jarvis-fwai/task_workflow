@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, publicProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 
-// Public procedure doesn't require auth (for form submissions)
 export const formsRouter = router({
   list: protectedProcedure
     .input(z.object({ projectId: z.string() }))
@@ -75,8 +74,8 @@ export const formsRouter = router({
       return ctx.prisma.form.delete({ where: { id: input.id } });
     }),
 
-  // Get form by public slug (for public form page)
-  getBySlug: protectedProcedure
+  // Get form by public slug (for public form page - no auth required)
+  getBySlug: publicProcedure
     .input(z.object({ slug: z.string() }))
     .query(async ({ ctx, input }) => {
       const form = await ctx.prisma.form.findUnique({
@@ -91,8 +90,8 @@ export const formsRouter = router({
       return form;
     }),
 
-  // Submit form (creates a task)
-  submit: protectedProcedure
+  // Submit form (creates a task - public, no auth required)
+  submit: publicProcedure
     .input(
       z.object({
         formId: z.string(),
@@ -109,12 +108,18 @@ export const formsRouter = router({
         (input.values["title"] as string) ||
         `Form submission: ${form.name}`;
 
+      // For public submissions, use the project creator as the task creator
+      const project = await ctx.prisma.project.findUniqueOrThrow({
+        where: { id: form.project.id },
+        select: { createdById: true },
+      });
+
       return ctx.prisma.task.create({
         data: {
           title,
           description: JSON.stringify(input.values),
           workspaceId: form.project.workspaceId,
-          createdById: ctx.session.user.id,
+          createdById: project.createdById,
           taskProjects: {
             create: {
               projectId: form.project.id,
