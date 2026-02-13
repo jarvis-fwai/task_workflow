@@ -46,6 +46,68 @@ import { RecurrencePicker } from "@/components/task/recurrence-picker";
 import { useUndo } from "@/contexts/undo-context";
 import { useSession } from "next-auth/react";
 
+function AssigneePicker({
+  currentAssignee,
+  workspaceId,
+  onSelect,
+}: {
+  currentAssignee: { name: string; id: string } | null;
+  workspaceId: string;
+  onSelect: (userId: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const { data: members } = trpc.workspaces.getMembers.useQuery(
+    { workspaceId },
+    { enabled: open }
+  );
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted/50"
+      >
+        {currentAssignee ? (
+          <>
+            <Avatar className="h-6 w-6">
+              <AvatarFallback className="bg-[#4573D2] text-[10px] text-white">
+                {currentAssignee.name?.split(" ").map((n) => n[0]).join("")}
+              </AvatarFallback>
+            </Avatar>
+            <span className="text-sm">{currentAssignee.name}</span>
+          </>
+        ) : (
+          <span className="text-sm text-muted-foreground">No assignee</span>
+        )}
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 z-50 mt-1 w-48 rounded-md border bg-white shadow-lg dark:bg-card">
+          <button
+            className="w-full px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted"
+            onClick={() => { onSelect(null); setOpen(false); }}
+          >
+            Unassign
+          </button>
+          {members?.map((m: any) => (
+            <button
+              key={m.userId}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
+              onClick={() => { onSelect(m.userId); setOpen(false); }}
+            >
+              <Avatar className="h-5 w-5">
+                <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                  {m.user?.name?.split(" ").map((n: string) => n[0]).join("")}
+                </AvatarFallback>
+              </Avatar>
+              {m.user?.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface TaskDetailPanelProps {
   taskId: string;
   onClose: () => void;
@@ -202,6 +264,13 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
     },
   });
 
+  const toggleFollow = trpc.tasks.toggleFollow.useMutation({
+    onSuccess: (data) => {
+      utils.tasks.get.invalidate({ id: taskId });
+      toast.success(data.following ? "Following task" : "Unfollowed task");
+    },
+  });
+
   // Follower check
   const isFollowing = task?.followers?.some(
     (f) => f.userId === session?.user?.id
@@ -329,6 +398,15 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           {approvalBadge}
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn("h-7 gap-1 text-xs", isFollowing && "text-[#4573D2]")}
+            onClick={() => toggleFollow.mutate({ taskId })}
+            title={isFollowing ? "Unfollow" : "Follow"}
+          >
+            {isFollowing ? <UserMinus className="h-3.5 w-3.5" /> : <UserPlus className="h-3.5 w-3.5" />}
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -484,25 +562,11 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
               <User className="h-4 w-4" />
               Assignee
             </div>
-            <div className="flex items-center gap-2">
-              {task.assignee ? (
-                <>
-                  <Avatar className="h-6 w-6">
-                    <AvatarFallback className="bg-[#4573D2] text-[10px] text-white">
-                      {task.assignee.name
-                        ?.split(" ")
-                        .map((n) => n[0])
-                        .join("")}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="text-sm">{task.assignee.name}</span>
-                </>
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  No assignee
-                </span>
-              )}
-            </div>
+            <AssigneePicker
+              currentAssignee={task.assignee}
+              workspaceId={task.workspaceId}
+              onSelect={(userId) => updateTask.mutate({ id: taskId, assigneeId: userId })}
+            />
           </div>
 
           {/* Due Date */}
@@ -511,21 +575,18 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
               <CalendarDays className="h-4 w-4" />
               Due date
             </div>
-            <div>
-              {task.dueDate ? (
-                <span className="text-sm">
-                  {new Date(task.dueDate).toLocaleDateString("en-US", {
-                    weekday: "short",
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </span>
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  No due date
-                </span>
-              )}
-            </div>
+            <Input
+              type="date"
+              className="h-7 w-40 text-sm"
+              defaultValue={task.dueDate ? new Date(task.dueDate).toISOString().split("T")[0] : ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                updateTask.mutate({
+                  id: taskId,
+                  dueDate: val ? new Date(val).toISOString() : null,
+                });
+              }}
+            />
           </div>
 
           {/* Estimated Hours */}

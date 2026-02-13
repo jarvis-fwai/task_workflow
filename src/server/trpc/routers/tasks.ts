@@ -692,6 +692,23 @@ export const tasksRouter = router({
       });
     }),
 
+  toggleFollow: protectedProcedure
+    .input(z.object({ taskId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.prisma.taskFollower.findFirst({
+        where: { taskId: input.taskId, userId: ctx.session.user.id },
+      });
+      if (existing) {
+        await ctx.prisma.taskFollower.delete({ where: { id: existing.id } });
+        return { following: false };
+      } else {
+        await ctx.prisma.taskFollower.create({
+          data: { taskId: input.taskId, userId: ctx.session.user.id },
+        });
+        return { following: true };
+      }
+    }),
+
   markAsApproval: protectedProcedure
     .input(
       z.object({
