@@ -16,8 +16,8 @@ export function ProjectTimelineView({
   projectId,
   onTaskClick,
 }: ProjectTimelineViewProps) {
-  const { data: sections } = trpc.sections.list.useQuery({ projectId });
-  const { data: tasks } = trpc.tasks.list.useQuery({ projectId });
+  const { data: sections, isLoading: sl } = trpc.sections.list.useQuery({ projectId });
+  const { data: tasks, isLoading: tl } = trpc.tasks.list.useQuery({ projectId });
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [weeksOffset, setWeeksOffset] = useState(0);
@@ -119,6 +119,21 @@ export function ProjectTimelineView({
       });
     });
   });
+
+  if (sl || tl) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+              <div className="h-6 animate-pulse rounded bg-muted" style={{ width: `${80 + Math.random() * 200}px` }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">

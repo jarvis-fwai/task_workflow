@@ -23,7 +23,7 @@ export function ProjectCalendarView({
   projectId,
   onTaskClick,
 }: ProjectCalendarViewProps) {
-  const { data: tasks } = trpc.tasks.list.useQuery({ projectId });
+  const { data: tasks, isLoading } = trpc.tasks.list.useQuery({ projectId });
   const utils = trpc.useUtils();
   const updateTask = trpc.tasks.update.useMutation({
     onSuccess: () => utils.tasks.list.invalidate({ projectId }),
@@ -94,6 +94,25 @@ export function ProjectCalendarView({
     month: "long",
     year: "numeric",
   });
+
+  if (isLoading) {
+    return (
+      <div className="px-6 py-4">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="h-7 w-7 animate-pulse rounded bg-muted" />
+          <div className="h-5 w-36 animate-pulse rounded bg-muted" />
+          <div className="h-7 w-7 animate-pulse rounded bg-muted" />
+        </div>
+        <div className="grid grid-cols-7 gap-px rounded-lg border bg-gray-200">
+          {Array.from({ length: 42 }).map((_, i) => (
+            <div key={i} className="min-h-[80px] bg-white p-2">
+              <div className="mb-1 h-3 w-4 animate-pulse rounded bg-muted" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
