@@ -316,7 +316,7 @@ export const tasksRouter = router({
         }
       }
 
-      return ctx.prisma.task.update({
+      const updated = await ctx.prisma.task.update({
         where: { id },
         data: {
           ...data,
@@ -334,6 +334,21 @@ export const tasksRouter = router({
           },
         },
       });
+
+      // Fire rules for assignment changes
+      if (data.assigneeId !== undefined && data.assigneeId !== existing?.assigneeId) {
+        const projectId = updated.taskProjects[0]?.projectId;
+        if (projectId) {
+          executeRules(ctx.prisma, "TASK_ASSIGNED", {
+            projectId,
+            taskId: id,
+            userId: ctx.session.user.id,
+            data: { newAssigneeId: data.assigneeId, oldAssigneeId: existing?.assigneeId },
+          }).catch(console.error);
+        }
+      }
+
+      return updated;
     }),
 
   complete: protectedProcedure

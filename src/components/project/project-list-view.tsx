@@ -36,7 +36,7 @@ export function ProjectListView({
   const utils = trpc.useUtils();
   const { pushUndo } = useUndo();
 
-  const { selectedTaskIds, toggle: toggleTask, isSelected } = useBulkSelection();
+  const { selectedTaskIds, toggle: toggleTask, toggleWithShift, selectAll, isSelected, count: selectedCount } = useBulkSelection();
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set()
@@ -185,8 +185,17 @@ export function ProjectListView({
     <div className="px-6 py-4">
       {/* Column Headers */}
       <div className="mb-1 flex items-center border-b pb-2 text-xs font-medium text-[#6d6e6f]">
+        <div className="flex w-6 items-center justify-center">
+          <input
+            type="checkbox"
+            checked={tasks ? tasks.length > 0 && selectedCount === tasks.length : false}
+            onChange={() => {
+              if (tasks) selectAll(tasks.map((t) => t.id));
+            }}
+            className="h-3.5 w-3.5 rounded border-gray-300 text-[#4573D2]"
+          />
+        </div>
         <div className="w-8" />
-        <div className="w-6" />
         <div className="flex-1">Task name</div>
         <div className="w-32 text-center">Assignee</div>
         <div className="w-32 text-center">Due date</div>
@@ -263,10 +272,14 @@ export function ProjectListView({
                     <input
                       type="checkbox"
                       checked={isSelected(task.id)}
-                      onChange={() => toggleTask(task.id)}
+                      onChange={() => {}}
                       className="h-3.5 w-3.5 rounded border-gray-300 text-[#4573D2] opacity-0 focus:ring-[#4573D2] group-hover:opacity-100"
                       style={{ opacity: isSelected(task.id) ? 1 : undefined }}
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const allTaskIds = tasks?.map((t) => t.id) ?? [];
+                        toggleWithShift(task.id, allTaskIds, e.shiftKey);
+                      }}
                     />
                   </div>
                   <div className="flex w-8 items-center justify-center">
@@ -295,6 +308,17 @@ export function ProjectListView({
                   >
                     {task.title}
                   </button>
+                  {(task as any).isApproval && (task as any).approvalStatus && (
+                    <span className={cn(
+                      "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                      (task as any).approvalStatus === "APPROVED" && "bg-green-100 text-green-700",
+                      (task as any).approvalStatus === "REJECTED" && "bg-red-100 text-red-700",
+                      (task as any).approvalStatus === "PENDING" && "bg-yellow-100 text-yellow-700",
+                      (task as any).approvalStatus === "CHANGES_REQUESTED" && "bg-orange-100 text-orange-700",
+                    )}>
+                      {(task as any).approvalStatus === "CHANGES_REQUESTED" ? "Changes" : (task as any).approvalStatus}
+                    </span>
+                  )}
                   <div className="flex w-32 items-center justify-center">
                     {task.assignee && (
                       <Avatar className="h-6 w-6">

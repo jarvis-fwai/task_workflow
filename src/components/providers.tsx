@@ -9,6 +9,7 @@ import { ThemeProvider } from "next-themes";
 import { trpc } from "@/lib/trpc";
 import { Toaster } from "@/components/ui/sonner";
 import { UndoProvider } from "@/contexts/undo-context";
+import { BulkSelectionProvider } from "@/contexts/bulk-selection-context";
 
 function getBaseUrl() {
   if (typeof window !== "undefined") return "";
@@ -53,7 +54,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <QueryClientProvider client={queryClient}>
           <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
             <UndoProvider>
-              {children}
+              <BulkSelectionProvider>
+                {children}
+              </BulkSelectionProvider>
             </UndoProvider>
             <Toaster position="bottom-right" richColors />
           </ThemeProvider>

@@ -3,6 +3,29 @@ import { router, protectedProcedure } from "../trpc";
 import { openai } from "../../ai/openai-client";
 import { TRPCError } from "@trpc/server";
 
+function generateMockResponse(message: string, taskContext: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("priority") || lower.includes("what should i work on")) {
+    if (taskContext) {
+      return `Based on your current tasks, here's my suggestion:\n\n${taskContext}\n\n**Recommendation:** Focus on overdue tasks first, then upcoming deadlines. Break large tasks into smaller subtasks if they feel overwhelming.`;
+    }
+    return "You don't have any tasks assigned yet. Head to **My Tasks** to see your work, or ask your project manager to assign tasks to you.";
+  }
+  if (lower.includes("dark mode") || lower.includes("theme")) {
+    return "To enable dark mode:\n1. Go to **Settings** → **Display** tab\n2. Select **Dark** from the theme options\n3. The change applies immediately!";
+  }
+  if (lower.includes("2fa") || lower.includes("two-factor")) {
+    return "To set up 2FA:\n1. Go to **Settings** → **Security** tab\n2. Click **Enable Two-Factor Authentication**\n3. Scan the QR code with your authenticator app\n4. Enter the verification code to confirm\n5. Save your backup codes in a safe place!";
+  }
+  if (lower.includes("overdue")) {
+    if (taskContext.includes("OVERDUE")) {
+      return `Here are your overdue tasks:\n\n${taskContext}\n\nI recommend addressing these as soon as possible. Consider updating deadlines if they're no longer realistic.`;
+    }
+    return "Great news — you don't have any overdue tasks! Keep up the good work. 🎉";
+  }
+  return `I can help you with:\n- **Task prioritization** — "What should I work on?"\n- **Navigation** — "Where do I find settings?"\n- **Feature guidance** — "How do I enable dark mode?"\n- **Project insights** — "Show me my overdue tasks"\n\nWhat would you like help with?`;
+}
+
 const TASKFLOW_SITE_MAP = `
 TaskFlow AI Site Structure:
 - /home — Dashboard with task overview, projects, goals widgets
@@ -189,6 +212,13 @@ IMPORTANT RULES:
       // Add the current message
       messages.push({ role: "user", content: input.message });
 
+      // Check if API key is configured
+      if (!process.env.OPENAI_API_KEY) {
+        // Mock response when no API key
+        const mockResponse = generateMockResponse(input.message, taskContext);
+        return { response: mockResponse, actions };
+      }
+
       try {
         const completion = await openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -220,12 +250,9 @@ IMPORTANT RULES:
 
         return { response: cleanResponse, actions };
       } catch (error: any) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message:
-            error?.message ||
-            "AI service unavailable. Please check your API key configuration.",
-        });
+        // Fallback to mock on error
+        const mockResponse = generateMockResponse(input.message, taskContext);
+        return { response: mockResponse + "\n\n*Note: AI service is currently unavailable. This is a helpful placeholder response.*", actions };
       }
     }),
 
@@ -262,6 +289,12 @@ IMPORTANT RULES:
 
       const prompt = `Summarize this task concisely in 2-3 sentences:\n\nTask: "${task.title}"\nStatus: ${task.status}\nAssignee: ${task.assignee?.name || "Unassigned"}\nDue: ${task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "No due date"}\nProject: ${task.taskProjects[0]?.project.name || "None"} / ${task.taskProjects[0]?.section?.name || "None"}\nTags: ${task.tags.map((t) => t.tag.name).join(", ") || "None"}\nSubtasks: ${subtaskStatus}\n${recentComments ? `Recent comments:\n${recentComments}` : "No comments"}\n\nProvide a brief, actionable summary.`;
 
+      if (!process.env.OPENAI_API_KEY) {
+        return {
+          summary: `**${task.title}** is ${task.status.toLowerCase()} and assigned to ${task.assignee?.name || "nobody"}. ${task.dueDate ? `Due ${new Date(task.dueDate).toLocaleDateString()}.` : "No due date set."} ${subtaskStatus}. ${recentComments ? "Has recent activity in comments." : "No recent comments."}`,
+        };
+      }
+
       try {
         const completion = await openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -274,10 +307,9 @@ IMPORTANT RULES:
             "Unable to generate summary.",
         };
       } catch {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to generate AI summary. Check your API key.",
-        });
+        return {
+          summary: `**${task.title}** is ${task.status.toLowerCase()} and assigned to ${task.assignee?.name || "nobody"}. ${task.dueDate ? `Due ${new Date(task.dueDate).toLocaleDateString()}.` : "No due date set."} ${subtaskStatus}.`,
+        };
       }
     }),
 
@@ -329,6 +361,21 @@ IMPORTANT RULES:
 
       const prompt = `Generate a brief project status update.\n\nProject: "${project.name}"\nTotal Tasks: ${totalTasks}\nCompleted: ${completedTasks} (${totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0}%)\nOverdue: ${overdueTasks}\nSections:\n${sectionBreakdown}\n\nLast status update: ${project.statusUpdates[0] ? `${project.statusUpdates[0].status} by ${project.statusUpdates[0].author.name}` : "None"}\n\nWrite a status update with:\n1. Overall status assessment (On Track / At Risk / Off Track)\n2. Key highlights (2-3 bullet points)\n3. Blockers or risks\n4. Next steps`;
 
+      const stats = {
+        total: totalTasks,
+        completed: completedTasks,
+        overdue: overdueTasks,
+        completionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+      };
+
+      if (!process.env.OPENAI_API_KEY) {
+        const statusLabel = overdueTasks > 2 ? "Off Track 🔴" : overdueTasks > 0 ? "At Risk 🟡" : "On Track 🟢";
+        return {
+          status: `**${statusLabel}**\n\n**Progress:** ${stats.completionRate}% complete (${completedTasks}/${totalTasks} tasks)\n\n**Highlights:**\n- ${completedTasks} tasks completed\n- ${overdueTasks} overdue tasks\n\n**Section breakdown:**\n${sectionBreakdown}\n\n*Note: AI service not configured. This is an auto-generated summary.*`,
+          stats,
+        };
+      }
+
       try {
         const completion = await openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -337,24 +384,15 @@ IMPORTANT RULES:
         });
 
         return {
-          status:
-            completion.choices[0]?.message?.content ||
-            "Unable to generate status.",
-          stats: {
-            total: totalTasks,
-            completed: completedTasks,
-            overdue: overdueTasks,
-            completionRate:
-              totalTasks > 0
-                ? Math.round((completedTasks / totalTasks) * 100)
-                : 0,
-          },
+          status: completion.choices[0]?.message?.content || "Unable to generate status.",
+          stats,
         };
       } catch {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to generate project status.",
-        });
+        const statusLabel = overdueTasks > 2 ? "Off Track 🔴" : overdueTasks > 0 ? "At Risk 🟡" : "On Track 🟢";
+        return {
+          status: `**${statusLabel}** — ${stats.completionRate}% complete. ${overdueTasks} overdue tasks.\n\n${sectionBreakdown}`,
+          stats,
+        };
       }
     }),
 
@@ -429,6 +467,23 @@ IMPORTANT RULES:
 
       const prompt = `As a productivity expert, analyze these tasks and suggest a prioritized order with brief reasoning. Group them into: Do Today, Do This Week, Schedule Later.\n\nTasks:\n${taskList}\n\nProvide actionable prioritization advice. Keep it concise.`;
 
+      if (!process.env.OPENAI_API_KEY) {
+        // Simple heuristic-based prioritization
+        const now = new Date();
+        const doToday = tasks.filter((t) => t.dueDate && new Date(t.dueDate) <= new Date(now.getTime() + 86400000));
+        const thisWeek = tasks.filter((t) => t.dueDate && new Date(t.dueDate) > new Date(now.getTime() + 86400000) && new Date(t.dueDate) <= new Date(now.getTime() + 7 * 86400000));
+        const later = tasks.filter((t) => !t.dueDate || new Date(t.dueDate) > new Date(now.getTime() + 7 * 86400000));
+
+        let suggestions = "**Do Today:**\n";
+        suggestions += doToday.length ? doToday.map((t) => `- ${t.title}`).join("\n") : "- No urgent tasks";
+        suggestions += "\n\n**Do This Week:**\n";
+        suggestions += thisWeek.length ? thisWeek.map((t) => `- ${t.title}`).join("\n") : "- No tasks due this week";
+        suggestions += "\n\n**Schedule Later:**\n";
+        suggestions += later.length ? later.map((t) => `- ${t.title}`).join("\n") : "- Nothing to defer";
+        suggestions += "\n\n*Auto-prioritized by due date. Configure an AI key for smarter suggestions.*";
+        return { suggestions };
+      }
+
       try {
         const completion = await openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -437,15 +492,10 @@ IMPORTANT RULES:
         });
 
         return {
-          suggestions:
-            completion.choices[0]?.message?.content ||
-            "Unable to generate suggestions.",
+          suggestions: completion.choices[0]?.message?.content || "Unable to generate suggestions.",
         };
       } catch {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "AI service unavailable.",
-        });
+        return { suggestions: "AI service temporarily unavailable. Please try again later." };
       }
     }),
 });

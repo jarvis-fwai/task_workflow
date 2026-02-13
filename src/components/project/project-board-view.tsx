@@ -24,6 +24,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
+import { useBulkSelection } from "@/contexts/bulk-selection-context";
+import { BulkActionsToolbar } from "@/components/task/bulk-actions-toolbar";
 import {
   DndContext,
   DragOverlay,
@@ -63,10 +65,14 @@ function SortableTaskCard({
   task,
   onTaskClick,
   onComplete,
+  isSelected,
+  onToggleSelect,
 }: {
   task: TaskItem;
   onTaskClick: (id: string) => void;
   onComplete: (id: string) => void;
+  isSelected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }) {
   const {
     attributes,
@@ -93,10 +99,23 @@ function SortableTaskCard({
     <Card
       ref={setNodeRef}
       style={style}
-      className="cursor-pointer border bg-white p-3 shadow-sm transition-shadow hover:shadow-md"
+      className={cn(
+        "group cursor-pointer border bg-white p-3 shadow-sm transition-shadow hover:shadow-md",
+        isSelected && "ring-2 ring-[#4573D2] ring-offset-1"
+      )}
       onClick={() => onTaskClick(task.id)}
     >
       <div className="flex items-start gap-2">
+        {onToggleSelect && (
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(task.id)}
+            className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 rounded border-gray-300 text-[#4573D2] opacity-0 group-hover:opacity-100"
+            style={{ opacity: isSelected ? 1 : undefined }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
         <div
           {...attributes}
           {...listeners}
@@ -127,6 +146,17 @@ function SortableTaskCard({
         >
           {task.title}
         </span>
+        {(task as any).isApproval && (task as any).approvalStatus && (
+          <span className={cn(
+            "ml-1.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+            (task as any).approvalStatus === "APPROVED" && "bg-green-100 text-green-700",
+            (task as any).approvalStatus === "REJECTED" && "bg-red-100 text-red-700",
+            (task as any).approvalStatus === "PENDING" && "bg-yellow-100 text-yellow-700",
+            (task as any).approvalStatus === "CHANGES_REQUESTED" && "bg-orange-100 text-orange-700",
+          )}>
+            {(task as any).approvalStatus === "PENDING" ? "⏳" : (task as any).approvalStatus === "APPROVED" ? "✓" : "✗"}
+          </span>
+        )}
       </div>
 
       {/* Tags */}
@@ -189,6 +219,7 @@ export function ProjectBoardView({
   const { data: sections } = trpc.sections.list.useQuery({ projectId });
   const { data: tasks } = trpc.tasks.list.useQuery({ projectId });
   const utils = trpc.useUtils();
+  const { toggle: toggleSelect, isSelected } = useBulkSelection();
 
   const [addingTaskInSection, setAddingTaskInSection] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
@@ -363,6 +394,8 @@ export function ProjectBoardView({
                       task={task}
                       onTaskClick={onTaskClick}
                       onComplete={(id) => completeTask.mutate({ id })}
+                      isSelected={isSelected(task.id)}
+                      onToggleSelect={toggleSelect}
                     />
                   ))}
                 </SortableContext>
@@ -416,6 +449,11 @@ export function ProjectBoardView({
           </Button>
         </div>
       </div>
+
+      <BulkActionsToolbar
+        projectId={projectId}
+        sections={sections?.map((s) => ({ id: s.id, name: s.name }))}
+      />
 
       {/* Drag Overlay */}
       <DragOverlay>

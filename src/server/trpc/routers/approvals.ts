@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
+import { TRPCError } from "@trpc/server";
 
 export const approvalsRouter = router({
   request: protectedProcedure
@@ -11,7 +12,6 @@ export const approvalsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Mark task as approval
       await ctx.prisma.task.update({
         where: { id: input.taskId },
         data: { isApproval: true, approvalStatus: "PENDING" },
@@ -26,7 +26,6 @@ export const approvalsRouter = router({
         },
       });
 
-      // Create notification for approver
       const task = await ctx.prisma.task.findUnique({
         where: { id: input.taskId },
         select: { title: true },
@@ -55,6 +54,18 @@ export const approvalsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.prisma.approvalRequest.findUniqueOrThrow({
+        where: { id: input.approvalId },
+      });
+
+      // Only the designated approver can respond
+      if (existing.approverId !== ctx.session.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the designated approver can respond to this request",
+        });
+      }
+
       const approval = await ctx.prisma.approvalRequest.update({
         where: { id: input.approvalId },
         data: {
@@ -63,13 +74,11 @@ export const approvalsRouter = router({
         },
       });
 
-      // Update task approval status
       await ctx.prisma.task.update({
         where: { id: approval.taskId },
         data: { approvalStatus: input.status },
       });
 
-      // Notify the requester
       const task = await ctx.prisma.task.findUnique({
         where: { id: approval.taskId },
         select: { title: true },
@@ -87,6 +96,40 @@ export const approvalsRouter = router({
       });
 
       return approval;
+    }),
+
+  cancel: protectedProcedure
+    .input(z.object({ approvalId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.prisma.approvalRequest.findUniqueOrThrow({
+        where: { id: input.approvalId },
+      });
+
+      // Only the requester can cancel
+      if (existing.requesterId !== ctx.session.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the requester can cancel this approval",
+        });
+      }
+
+      await ctx.prisma.approvalRequest.delete({
+        where: { id: input.approvalId },
+      });
+
+      // Check if there are other pending approvals for this task
+      const remaining = await ctx.prisma.approvalRequest.count({
+        where: { taskId: existing.taskId, status: "PENDING" },
+      });
+
+      if (remaining === 0) {
+        await ctx.prisma.task.update({
+          where: { id: existing.taskId },
+          data: { isApproval: false, approvalStatus: null },
+        });
+      }
+
+      return { success: true };
     }),
 
   listForTask: protectedProcedure

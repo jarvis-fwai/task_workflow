@@ -137,6 +137,8 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const updateTask = trpc.tasks.update.useMutation({
     onSuccess: () => {
       utils.tasks.get.invalidate({ id: taskId });
+      utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
     },
   });
 

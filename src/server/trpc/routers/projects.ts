@@ -290,4 +290,22 @@ export const projectsRouter = router({
         include: { author: true },
       });
     }),
+
+  deleteStatusUpdate: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.prisma.statusUpdate.delete({
+        where: { id: input.id },
+      });
+    }),
+
+  latestStatus: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.prisma.statusUpdate.findFirst({
+        where: { projectId: input.projectId },
+        include: { author: true },
+        orderBy: { createdAt: "desc" },
+      });
+    }),
 });

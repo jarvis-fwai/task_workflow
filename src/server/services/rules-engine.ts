@@ -1,7 +1,26 @@
 import { PrismaClient } from "../../../prisma/generated/prisma/client";
 
-type RuleTriggerType = "TASK_ADDED" | "TASK_MOVED" | "TASK_COMPLETED" | "FIELD_CHANGED" | "DUE_DATE_APPROACHING";
-type RuleActionType = "SET_ASSIGNEE" | "MOVE_TO_SECTION" | "SET_FIELD" | "ADD_COMMENT" | "COMPLETE_TASK" | "SET_DUE_DATE";
+type RuleTriggerType =
+  | "TASK_ADDED"
+  | "TASK_MOVED"
+  | "TASK_COMPLETED"
+  | "TASK_STATUS_CHANGED"
+  | "TASK_ASSIGNED"
+  | "FIELD_CHANGED"
+  | "CUSTOM_FIELD_CHANGED"
+  | "DUE_DATE_APPROACHING";
+
+type RuleActionType =
+  | "SET_ASSIGNEE"
+  | "MOVE_TO_SECTION"
+  | "SET_FIELD"
+  | "SET_STATUS"
+  | "ADD_COMMENT"
+  | "ADD_TAG"
+  | "COMPLETE_TASK"
+  | "SET_DUE_DATE"
+  | "SET_CUSTOM_FIELD"
+  | "SEND_NOTIFICATION";
 
 interface RuleAction {
   type: RuleActionType;
@@ -29,7 +48,6 @@ export async function executeRules(
     data?: Record<string, unknown>;
   }
 ): Promise<void> {
-  // 1. Find all active rules for the project with matching trigger type
   const rules = await prisma.rule.findMany({
     where: {
       projectId: context.projectId,
@@ -37,20 +55,24 @@ export async function executeRules(
     },
   });
 
-  // 2. Filter rules by trigger type
   const matchingRules = rules.filter((rule) => {
-    const trigger = rule.trigger as { type: string };
-    return trigger.type === triggerType;
+    const trigger = rule.trigger as { type: string; config?: Record<string, unknown> };
+    if (trigger.type !== triggerType) return false;
+
+    // Check trigger config for additional matching
+    if (trigger.config && context.data) {
+      if (trigger.config.sectionId && context.data.sectionId && trigger.config.sectionId !== context.data.sectionId) return false;
+      if (trigger.config.status && context.data.newStatus && trigger.config.status !== context.data.newStatus) return false;
+      if (trigger.config.fieldName && context.data.fieldName && trigger.config.fieldName !== context.data.fieldName) return false;
+    }
+    return true;
   });
 
-  // 3. Execute each matching rule's actions (after evaluating conditions)
   for (const rule of matchingRules) {
-    // Evaluate conditions if present
     const ruleConditions = rule.conditions as unknown as RuleConditions | null;
     if (ruleConditions?.conditions && ruleConditions.conditions.length > 0) {
       const conditionsMet = await evaluateConditions(prisma, ruleConditions, context);
       if (!conditionsMet) {
-        // Log skipped rule
         await logRuleExecution(prisma, rule.id, context.taskId, "SKIPPED", "Conditions not met");
         continue;
       }
@@ -77,26 +99,21 @@ async function evaluateConditions(
   const { logic = "AND", conditions = [] } = ruleConditions;
   if (conditions.length === 0) return true;
 
-  // Fetch the task with its custom field values
   const task = await prisma.task.findUnique({
     where: { id: context.taskId },
     include: {
       assignee: true,
       taskProjects: { include: { section: true } },
       customFieldValues: { include: { customField: true } },
+      tags: { include: { tag: true } },
     },
   });
 
   if (!task) return false;
 
-  const results = conditions.map((condition) => {
-    return evaluateSingleCondition(condition, task);
-  });
+  const results = conditions.map((condition) => evaluateSingleCondition(condition, task));
 
-  if (logic === "OR") {
-    return results.some((r) => r);
-  }
-  return results.every((r) => r);
+  return logic === "OR" ? results.some((r) => r) : results.every((r) => r);
 }
 
 function evaluateSingleCondition(
@@ -106,12 +123,12 @@ function evaluateSingleCondition(
     status: string;
     assigneeId: string | null;
     dueDate: Date | null;
-    assignee: { name: string } | null;
-    taskProjects: { section: { name: string } | null }[];
+    assignee: { name: string; id: string } | null;
+    taskProjects: { section: { name: string; id: string } | null }[];
     customFieldValues: { customField: { name: string }; stringValue: string | null; numberValue: number | null }[];
+    tags: { tag: { name: string } }[];
   }
 ): boolean {
-  // Resolve field value
   let fieldValue: string | number | null = null;
 
   switch (condition.field) {
@@ -124,14 +141,19 @@ function evaluateSingleCondition(
     case "assignee":
       fieldValue = task.assignee?.name ?? null;
       break;
+    case "assigneeId":
+      fieldValue = task.assigneeId;
+      break;
     case "section":
       fieldValue = task.taskProjects[0]?.section?.name ?? null;
       break;
     case "dueDate":
       fieldValue = task.dueDate?.toISOString() ?? null;
       break;
+    case "tags":
+      fieldValue = task.tags.map((t) => t.tag.name).join(",");
+      break;
     default: {
-      // Check custom fields
       const cfv = task.customFieldValues.find(
         (v) => v.customField.name === condition.field
       );
@@ -199,6 +221,7 @@ async function executeAction(
         data: { status: "COMPLETE", completedAt: new Date() },
       });
       break;
+
     case "SET_ASSIGNEE":
       if (action.config) {
         await prisma.task.update({
@@ -207,6 +230,7 @@ async function executeAction(
         });
       }
       break;
+
     case "MOVE_TO_SECTION":
       if (action.config) {
         await prisma.taskProject.updateMany({
@@ -215,6 +239,7 @@ async function executeAction(
         });
       }
       break;
+
     case "ADD_COMMENT":
       if (action.config) {
         await prisma.comment.create({
@@ -226,6 +251,7 @@ async function executeAction(
         });
       }
       break;
+
     case "SET_DUE_DATE":
       if (action.config) {
         const daysFromNow = parseInt(action.config, 10);
@@ -239,8 +265,49 @@ async function executeAction(
         }
       }
       break;
+
+    case "SET_STATUS":
+      if (action.config) {
+        const status = action.config as "INCOMPLETE" | "COMPLETE";
+        await prisma.task.update({
+          where: { id: context.taskId },
+          data: {
+            status,
+            ...(status === "COMPLETE" ? { completedAt: new Date() } : { completedAt: null }),
+          },
+        });
+      }
+      break;
+
+    case "ADD_TAG":
+      if (action.config) {
+        const task = await prisma.task.findUnique({
+          where: { id: context.taskId },
+          select: { workspaceId: true },
+        });
+        if (task) {
+          let tag = await prisma.tag.findFirst({
+            where: { name: action.config, workspaceId: task.workspaceId },
+          });
+          if (!tag) {
+            tag = await prisma.tag.create({
+              data: { name: action.config, color: "#4573D2", workspaceId: task.workspaceId },
+            });
+          }
+          const existing = await prisma.taskTag.findFirst({
+            where: { taskId: context.taskId, tagId: tag.id },
+          });
+          if (!existing) {
+            await prisma.taskTag.create({
+              data: { taskId: context.taskId, tagId: tag.id },
+            });
+          }
+        }
+      }
+      break;
+
     case "SET_FIELD":
-      // Config format: "fieldId:value"
+    case "SET_CUSTOM_FIELD":
       if (action.config) {
         const [fieldId, ...valueParts] = action.config.split(":");
         const value = valueParts.join(":");
@@ -259,6 +326,38 @@ async function executeAction(
             },
             update: {
               stringValue: value,
+            },
+          });
+        }
+      }
+      break;
+
+    case "SEND_NOTIFICATION":
+      if (action.config) {
+        // Config format: "userId:message" or just "message" (notify task assignee)
+        const parts = action.config.split(":");
+        let targetUserId: string | null = null;
+        let message: string;
+        if (parts.length >= 2 && parts[0]!.length > 10) {
+          targetUserId = parts[0]!;
+          message = parts.slice(1).join(":");
+        } else {
+          message = action.config;
+          const task = await prisma.task.findUnique({
+            where: { id: context.taskId },
+            select: { assigneeId: true },
+          });
+          targetUserId = task?.assigneeId ?? null;
+        }
+        if (targetUserId) {
+          await prisma.notification.create({
+            data: {
+              userId: targetUserId,
+              type: "RULE_TRIGGERED",
+              message,
+              resourceId: context.taskId,
+              resourceType: "task",
+              actorId: context.userId,
             },
           });
         }

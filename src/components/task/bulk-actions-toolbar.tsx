@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useBulkSelection } from "@/contexts/bulk-selection-context";
+import { useUndo } from "@/contexts/undo-context";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import {
   UserPlus,
   CalendarDays,
   ArrowRightLeft,
+  FolderOpen,
 } from "lucide-react";
 import {
   Popover,
@@ -25,24 +27,36 @@ interface BulkActionsToolbarProps {
   sections?: Array<{ id: string; name: string }>;
 }
 
+const STATUSES = [
+  { value: "INCOMPLETE" as const, label: "Incomplete" },
+  { value: "COMPLETE" as const, label: "Complete" },
+];
+
 export function BulkActionsToolbar({
   projectId,
   sections,
 }: BulkActionsToolbarProps) {
   const { selectedTaskIds, clearSelection, count } = useBulkSelection();
+  const { pushUndo } = useUndo();
   const [dueDate, setDueDate] = useState("");
   const utils = trpc.useUtils();
 
+  const invalidateAll = () => {
+    utils.tasks.list.invalidate({ projectId });
+    utils.tasks.myTasks.invalidate();
+    utils.tasks.get.invalidate();
+  };
+
   const bulkUpdate = trpc.tasks.bulkUpdate.useMutation({
     onSuccess: () => {
-      utils.tasks.list.invalidate({ projectId });
+      invalidateAll();
       clearSelection();
     },
   });
 
   const bulkDelete = trpc.tasks.bulkDelete.useMutation({
     onSuccess: () => {
-      utils.tasks.list.invalidate({ projectId });
+      invalidateAll();
       clearSelection();
       toast.success(`${count} tasks deleted`);
     },
@@ -50,7 +64,7 @@ export function BulkActionsToolbar({
 
   const bulkMove = trpc.tasks.bulkMove.useMutation({
     onSuccess: () => {
-      utils.tasks.list.invalidate({ projectId });
+      invalidateAll();
       clearSelection();
       toast.success("Tasks moved");
     },
@@ -61,45 +75,72 @@ export function BulkActionsToolbar({
   const taskIds = Array.from(selectedTaskIds);
 
   return (
-    <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 transform">
-      <div className="flex items-center gap-2 rounded-lg border bg-white px-4 py-2 shadow-lg dark:bg-card">
-        <span className="text-sm font-medium">
+    <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 transform animate-in slide-in-from-bottom-4 duration-200">
+      <div className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-4 py-2.5 shadow-xl dark:border-gray-700 dark:bg-card">
+        <span className="mr-2 text-sm font-semibold text-[#1e1f21] dark:text-foreground">
           {count} task{count > 1 ? "s" : ""} selected
         </span>
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1 text-xs"
+          className="h-7 gap-1 text-xs text-muted-foreground"
           onClick={clearSelection}
         >
           <X className="h-3 w-3" />
-          Clear
         </Button>
-        <div className="mx-2 h-4 w-px bg-border" />
+        <div className="mx-1 h-5 w-px bg-gray-200 dark:bg-gray-600" />
 
-        {/* Bulk Complete */}
+        {/* Complete */}
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1 text-xs"
+          className="h-8 gap-1.5 text-xs"
           onClick={() => {
             bulkUpdate.mutate({ taskIds, status: "COMPLETE" });
-            toast.success(`${count} tasks completed`);
+            pushUndo(`${count} tasks completed`, () => {
+              bulkUpdate.mutate({ taskIds, status: "INCOMPLETE" });
+            });
           }}
         >
           <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
           Complete
         </Button>
 
-        {/* Bulk Set Due Date */}
+        {/* Set Status */}
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs">
-              <CalendarDays className="h-3.5 w-3.5" />
-              Due Date
+            <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs">
+              <FolderOpen className="h-3.5 w-3.5" />
+              Status
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-auto p-2" align="center">
+          <PopoverContent className="w-40 p-1" align="center">
+            {STATUSES.map((s) => (
+              <button
+                key={s.value}
+                className="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-muted"
+                onClick={() => {
+                  bulkUpdate.mutate({ taskIds, status: s.value });
+                  pushUndo(`Status set to ${s.label}`, () => {
+                    bulkUpdate.mutate({ taskIds, status: "INCOMPLETE" });
+                  });
+                }}
+              >
+                {s.label}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+
+        {/* Due Date */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs">
+              <CalendarDays className="h-3.5 w-3.5" />
+              Due date
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-3" align="center">
             <Input
               type="date"
               value={dueDate}
@@ -115,8 +156,10 @@ export function BulkActionsToolbar({
                     taskIds,
                     dueDate: new Date(dueDate).toISOString(),
                   });
+                  pushUndo("Due dates updated", () => {
+                    bulkUpdate.mutate({ taskIds, dueDate: null });
+                  });
                   setDueDate("");
-                  toast.success("Due dates updated");
                 }
               }}
             >
@@ -125,11 +168,11 @@ export function BulkActionsToolbar({
           </PopoverContent>
         </Popover>
 
-        {/* Bulk Move */}
+        {/* Move to section */}
         {sections && sections.length > 0 && (
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs">
+              <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs">
                 <ArrowRightLeft className="h-3.5 w-3.5" />
                 Move
               </Button>
@@ -138,12 +181,12 @@ export function BulkActionsToolbar({
               {sections.map((section) => (
                 <button
                   key={section.id}
-                  className="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-muted"
+                  className="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-muted"
                   onClick={() => {
-                    bulkMove.mutate({
-                      taskIds,
-                      projectId,
-                      sectionId: section.id,
+                    bulkMove.mutate({ taskIds, projectId, sectionId: section.id });
+                    pushUndo(`Tasks moved to ${section.name}`, () => {
+                      // Can't easily undo move without storing previous sections
+                      toast.info("Undo move not available for this action");
                     });
                   }}
                 >
@@ -154,14 +197,17 @@ export function BulkActionsToolbar({
           </Popover>
         )}
 
-        {/* Bulk Delete */}
+        {/* Delete */}
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
+          className="h-8 gap-1.5 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
           onClick={() => {
-            if (confirm(`Delete ${count} tasks? This cannot be undone.`)) {
+            if (confirm(`Delete ${count} task${count > 1 ? "s" : ""}?`)) {
               bulkDelete.mutate({ taskIds });
+              pushUndo(`${count} tasks deleted`, () => {
+                toast.info("Deleted tasks cannot be restored");
+              });
             }
           }}
         >
