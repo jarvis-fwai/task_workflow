@@ -30,12 +30,19 @@ import {
   Hash,
   Pencil,
   Clock,
+  Diamond,
+  UserPlus,
+  UserMinus,
+  Repeat,
+  Plus,
+  Search,
 } from "lucide-react";
 import { AiTaskSummary } from "@/components/ai/ai-task-summary";
 import { RichTextEditor } from "@/components/editor/rich-text-editor";
 import { ReactionGroup } from "@/components/reactions/reaction-group";
 import { ImageProofing } from "@/components/proofing/image-proofing";
 import { VideoRecorder } from "@/components/comments/video-recorder";
+import { RecurrencePicker } from "@/components/task/recurrence-picker";
 import { useUndo } from "@/contexts/undo-context";
 import { useSession } from "next-auth/react";
 
@@ -59,6 +66,11 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const [proofingAttachment, setProofingAttachment] = useState<{ id: string; url: string; name: string } | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoDuration, setVideoDuration] = useState<number>(0);
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
+  const [showAddSubtask, setShowAddSubtask] = useState(false);
+  const [showRecurrence, setShowRecurrence] = useState(false);
+  const [showAddDep, setShowAddDep] = useState(false);
+  const [depSearch, setDepSearch] = useState("");
 
   const updateTask = trpc.tasks.update.useMutation({
     onSuccess: () => {
@@ -167,6 +179,32 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
       utils.tasks.get.invalidate({ id: taskId });
     },
   });
+
+  const addDependency = trpc.tasks.addDependency.useMutation({
+    onSuccess: () => {
+      utils.tasks.get.invalidate({ id: taskId });
+      setShowAddDep(false);
+      setDepSearch("");
+    },
+  });
+
+  const setRecurrence = trpc.tasks.setRecurrence.useMutation({
+    onSuccess: () => {
+      utils.tasks.get.invalidate({ id: taskId });
+      toast.success("Recurrence updated");
+    },
+  });
+
+  // Follower check
+  const isFollowing = task?.followers?.some(
+    (f) => f.userId === session?.user?.id
+  );
+
+  // Search tasks for dependency picker
+  const { data: depSearchResults } = trpc.search.global.useQuery(
+    { query: depSearch, workspaceId: task?.workspaceId ?? "" },
+    { enabled: depSearch.length > 2 && !!task?.workspaceId }
+  );
 
   if (isLoading) {
     return (
@@ -607,6 +645,81 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
               </div>
             </div>
           )}
+
+          {/* Followers */}
+          <div className="flex items-start">
+            <div className="flex w-32 items-center gap-2 pt-0.5 text-sm text-muted-foreground">
+              <UserPlus className="h-4 w-4" />
+              Followers
+            </div>
+            <div className="flex flex-wrap items-center gap-1">
+              {task.followers?.map((f) => (
+                <span key={f.id} className="rounded-full bg-muted px-2 py-0.5 text-xs">
+                  {f.user.name}
+                </span>
+              ))}
+              {task.followers?.length === 0 && (
+                <span className="text-sm text-muted-foreground">None</span>
+              )}
+            </div>
+          </div>
+
+          {/* Milestone toggle */}
+          <div className="flex items-center">
+            <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">
+              <Diamond className="h-4 w-4" />
+              Milestone
+            </div>
+            <button
+              onClick={() => updateTask.mutate({ id: taskId, isMilestone: !task.isMilestone } as any)}
+              className={cn(
+                "rounded px-2 py-0.5 text-xs",
+                task.isMilestone ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30" : "bg-muted text-muted-foreground"
+              )}
+            >
+              {task.isMilestone ? "◆ Milestone" : "Mark as milestone"}
+            </button>
+          </div>
+
+          {/* Recurrence */}
+          <div className="flex items-center">
+            <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">
+              <Repeat className="h-4 w-4" />
+              Recurrence
+            </div>
+            <button
+              onClick={() => setShowRecurrence(!showRecurrence)}
+              className="rounded px-2 py-0.5 text-xs bg-muted text-muted-foreground hover:bg-muted/80"
+            >
+              {task.isRecurring ? "Recurring ✓" : "Set recurrence"}
+            </button>
+          </div>
+
+          {showRecurrence && (
+            <div className="ml-32 mt-1">
+              <RecurrencePicker
+                taskId={taskId}
+                recurrenceRule={task.recurrenceRule as any}
+                isRecurring={task.isRecurring}
+              />
+            </div>
+          )}
+
+          {/* Custom Fields */}
+          {task.customFieldValues && task.customFieldValues.length > 0 && (
+            <div className="space-y-2">
+              {task.customFieldValues.map((cfv: any) => (
+                <div key={cfv.id} className="flex items-center">
+                  <div className="w-32 text-sm text-muted-foreground truncate">
+                    {cfv.customField?.name}
+                  </div>
+                  <span className="text-sm">
+                    {cfv.stringValue || cfv.numberValue || (cfv.dateValue ? new Date(cfv.dateValue).toLocaleDateString() : cfv.selectedOptions?.join(", ") || "—")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* AI Summary */}
@@ -688,16 +801,37 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
         )}
 
         {/* Subtasks */}
-        {task.subtasks && task.subtasks.length > 0 && (
-          <div className="mt-6">
-            <h3 className="mb-2 text-sm font-medium text-[#6d6e6f]">
-              Subtasks
+        <div className="mt-6">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-medium text-[#6d6e6f]">
+              Subtasks {task.subtasks && task.subtasks.length > 0 && (
+                <span className="text-xs font-normal">
+                  ({task.subtasks.filter((s) => s.status === "COMPLETE").length}/{task.subtasks.length})
+                </span>
+              )}
             </h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 text-xs"
+              onClick={() => setShowAddSubtask(true)}
+            >
+              <Plus className="h-3 w-3" /> Add subtask
+            </Button>
+          </div>
+          {task.subtasks && task.subtasks.length > 0 && (
             <div className="space-y-1">
               {task.subtasks.map((subtask) => (
                 <div
                   key={subtask.id}
-                  className="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted/50"
+                  className="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer"
+                  onClick={() => {
+                    if (subtask.status === "COMPLETE") {
+                      uncompleteTask.mutate({ id: subtask.id });
+                    } else {
+                      completeTask.mutate({ id: subtask.id });
+                    }
+                  }}
                 >
                   {subtask.status === "COMPLETE" ? (
                     <CheckCircle2 className="h-4 w-4 text-green-600" />
@@ -713,11 +847,92 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                   >
                     {subtask.title}
                   </span>
+                  {subtask._count?.subtasks ? (
+                    <span className="text-[10px] text-muted-foreground">
+                      +{subtask._count.subtasks}
+                    </span>
+                  ) : null}
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+          {showAddSubtask && (
+            <form
+              className="mt-1 flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (newSubtaskTitle.trim() && task.taskProjects?.[0]) {
+                  createTask.mutate({
+                    title: newSubtaskTitle.trim(),
+                    projectId: task.taskProjects[0].projectId,
+                    sectionId: task.taskProjects[0].sectionId ?? undefined,
+                    parentTaskId: taskId,
+                  });
+                  setNewSubtaskTitle("");
+                }
+              }}
+            >
+              <Circle className="h-4 w-4 text-[#cfcbcb]" />
+              <Input
+                value={newSubtaskTitle}
+                onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                placeholder="Subtask name..."
+                className="h-7 text-sm"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setShowAddSubtask(false);
+                    setNewSubtaskTitle("");
+                  }
+                }}
+              />
+            </form>
+          )}
+        </div>
+
+        {/* Add Dependency */}
+        <div className="mt-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 text-xs text-muted-foreground"
+            onClick={() => setShowAddDep(!showAddDep)}
+          >
+            <Link2 className="h-3 w-3" /> Add dependency
+          </Button>
+          {showAddDep && (
+            <div className="mt-1">
+              <Input
+                value={depSearch}
+                onChange={(e) => setDepSearch(e.target.value)}
+                placeholder="Search tasks..."
+                className="h-7 text-sm"
+                autoFocus
+              />
+              {depSearchResults?.tasks && depSearchResults.tasks.length > 0 && (
+                <div className="mt-1 max-h-32 overflow-y-auto rounded border">
+                  {depSearchResults.tasks
+                    .filter((t: any) => t.id !== taskId)
+                    .slice(0, 5)
+                    .map((t: any) => (
+                      <button
+                        key={t.id}
+                        className="w-full px-2 py-1 text-left text-xs hover:bg-muted"
+                        onClick={() =>
+                          addDependency.mutate({
+                            taskId,
+                            dependsOnTaskId: t.id,
+                          })
+                        }
+                      >
+                        {t.title}
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <Separator className="my-6" />
 
